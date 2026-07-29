@@ -314,10 +314,17 @@ html, body {
   text-shadow: 0 2px 12px rgba(0,0,0,0.8);
 }
 
-.song-info {
-  font-size: 20px;
-  opacity: 0.85;
-  margin-bottom: 24px;
+.player-title-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  padding: 24px 40px;
+  text-align: center;
+  font-size: 22px;
+  opacity: 0.9;
+  background: linear-gradient(rgba(0,0,0,0.65), transparent);
 }
 
 .lyrics {
@@ -333,8 +340,8 @@ html, body {
 }
 
 .lyrics-prev, .lyrics-next {
-  font-size: 20px;
-  opacity: 0.45;
+  font-size: 26px;
+  opacity: 0.5;
 }
 
 .lyrics-current {
