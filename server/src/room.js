@@ -14,6 +14,11 @@ export class Room {
     this.queue = []; // userIds waiting their turn, FIFO
     this.activeSingers = new Set(); // userIds currently "called" or "singing"
     this.ranking = []; // [{ nickname, songTitle, total, max, at }]
+    this.lowLatencyMode = false;
+  }
+
+  setLowLatencyMode(enabled) {
+    this.lowLatencyMode = Boolean(enabled);
   }
 
   join(socket, { nickname, role }) {
@@ -112,6 +117,7 @@ export class Room {
       users: this.toPublicList(),
       queue: this.queue.map((id) => this.users.get(id)?.nickname ?? '?'),
       ranking: this.ranking.slice(0, 10),
+      lowLatencyMode: this.lowLatencyMode,
     });
   }
 }

@@ -163,6 +163,42 @@ html, body {
   background: #5b4bd1;
 }
 
+.network-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #9c9db3;
+}
+
+.network-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #555;
+  display: inline-block;
+}
+
+.network-dot.ok { background: #2ecc71; }
+.network-dot.warn { background: #ffd23f; }
+.network-dot.high { background: #ff6b6b; }
+
+.low-latency-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #33344a;
+  background: #171826;
+  color: #9c9db3;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.low-latency-btn.active {
+  background: #6c5ce7;
+  color: #fff;
+  border-color: #6c5ce7;
+}
+
 .song-card {
   background: #171826;
   border: 1px solid #262740;

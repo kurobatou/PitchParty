@@ -99,7 +99,9 @@ async function openSong(id) {
       };
     });
 
-  if (song.hasVideo && song.videoUrl) {
+  const useVideo = song.hasVideo && song.videoUrl && !lowLatencyMode;
+
+  if (useVideo) {
     bgVideoEl.src = song.videoUrl;
     bgVideoEl.classList.remove('hidden');
     bgFallbackEl.classList.add('hidden');
@@ -115,7 +117,7 @@ async function openSong(id) {
   playerView.classList.remove('hidden');
 
   audioEl.play().catch(() => {});
-  if (song.hasVideo && song.videoUrl) bgVideoEl.play().catch(() => {});
+  if (useVideo) bgVideoEl.play().catch(() => {});
 
   cancelAnimationFrame(rafHandle);
   tickLyrics();
@@ -164,6 +166,10 @@ const STATE_LABELS = {
 };
 
 let roomWs = null;
+let lowLatencyMode = false;
+
+const LATENCY_WARN_MS = 150;
+const LATENCY_HIGH_MS = 300;
 
 async function loadQr() {
   const joinUrl = `${location.origin}/join.html`;
@@ -217,6 +223,37 @@ function renderRanking(ranking) {
     }).join('');
 }
 
+function renderNetworkStatus(users) {
+  const active = users.filter((u) => (u.state === 'singing' || u.state === 'called') && u.latencyMs != null);
+  const dot = document.getElementById('network-dot');
+  const label = document.getElementById('network-label');
+
+  if (active.length === 0) {
+    dot.className = 'network-dot';
+    label.textContent = 'Red: sin cantantes activos';
+    return;
+  }
+
+  const worst = Math.max(...active.map((u) => u.latencyMs));
+  if (worst >= LATENCY_HIGH_MS) {
+    dot.className = 'network-dot high';
+    label.textContent = `Red: latencia alta (${worst}ms)`;
+  } else if (worst >= LATENCY_WARN_MS) {
+    dot.className = 'network-dot warn';
+    label.textContent = `Red: algo de latencia (${worst}ms)`;
+  } else {
+    dot.className = 'network-dot ok';
+    label.textContent = `Red: buena (${worst}ms)`;
+  }
+}
+
+function renderLowLatencyToggle(enabled) {
+  lowLatencyMode = enabled;
+  const btn = document.getElementById('low-latency-toggle');
+  btn.textContent = `Modo baja latencia: ${enabled ? 'ON' : 'OFF'}`;
+  btn.classList.toggle('active', enabled);
+}
+
 function connectRoom() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   roomWs = new WebSocket(`${proto}://${location.host}/ws/room`);
@@ -231,6 +268,8 @@ function connectRoom() {
       renderUsers(data.users);
       renderQueue(data.queue);
       renderRanking(data.ranking);
+      renderNetworkStatus(data.users);
+      renderLowLatencyToggle(data.lowLatencyMode);
     }
   };
 
@@ -242,6 +281,12 @@ function connectRoom() {
 document.getElementById('advance-btn').addEventListener('click', () => {
   if (roomWs?.readyState === WebSocket.OPEN) {
     roomWs.send(JSON.stringify({ type: 'advanceQueue' }));
+  }
+});
+
+document.getElementById('low-latency-toggle').addEventListener('click', () => {
+  if (roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'toggleLowLatency', enabled: !lowLatencyMode }));
   }
 });
 

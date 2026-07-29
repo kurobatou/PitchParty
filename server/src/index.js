@@ -155,6 +155,14 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
       return;
     }
 
+    if (msg.type === 'toggleLowLatency') {
+      const user = room.users.get(userId);
+      if (user?.role !== 'screen') return; // only the pantalla principal controls this (plan §9)
+      room.setLowLatencyMode(msg.enabled);
+      room.broadcastState();
+      return;
+    }
+
     if (msg.type === 'ping') {
       socket.send(JSON.stringify({ type: 'pong', t0: msg.t0 }));
       return;
