@@ -8,7 +8,7 @@ import numpy as np
 
 MIN_FREQ_HZ = 70.0
 MAX_FREQ_HZ = 1000.0
-MIN_RMS = 0.01  # frames quieter than this are treated as silence
+MIN_RMS = 0.006  # frames quieter than this are treated as silence
 
 
 def detect_pitch(samples: np.ndarray, sample_rate: int) -> float | None:

@@ -9,7 +9,7 @@ UltraStar scoring behavior is an open question for a later phase.
 import math
 
 SCORABLE_TYPES = {'normal', 'golden'}
-HIT_TOLERANCE_SEMITONES = 2.0
+HIT_TOLERANCE_SEMITONES = 2.5
 GOLDEN_POINTS = 2
 NORMAL_POINTS = 1
 
@@ -20,6 +20,15 @@ def freq_to_midi(freq_hz: float) -> float:
 
 def usdx_pitch_to_midi(pitch: int) -> float:
     return pitch + 60.0
+
+
+def pitch_class_diff(detected_midi: float, expected_midi: float) -> float:
+    """Semitone distance ignoring octave. A simple autocorrelation detector
+    (and singers whose comfortable range sits an octave from the original
+    recording) commonly land the right note in the wrong octave — without
+    this, that scores zero despite being musically "in tune"."""
+    diff = abs(detected_midi - expected_midi) % 12
+    return min(diff, 12 - diff)
 
 
 class ScoringSession:
@@ -56,7 +65,7 @@ class ScoringSession:
         if expected is not None:
             self.max_score += expected['points']
             if detected_midi is not None:
-                diff = abs(detected_midi - expected['pitch_midi'])
+                diff = pitch_class_diff(detected_midi, expected['pitch_midi'])
                 if diff <= HIT_TOLERANCE_SEMITONES:
                     hit = True
                     points = expected['points']

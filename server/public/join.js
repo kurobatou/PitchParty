@@ -32,6 +32,28 @@ let silentGain = null;
 let mediaStream = null;
 let singWs = null;
 
+// A separate, short-lived context just for the "it's your turn" alert.
+// iOS only allows starting audio from a user gesture, and the alert has
+// to fire from a WebSocket message (no gesture) — so we create/unlock it
+// here, on the last button tap before the phone just sits and waits.
+let alertCtx = null;
+
+function playCallAlert() {
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+
+  if (!alertCtx) return;
+  const osc = alertCtx.createOscillator();
+  const gain = alertCtx.createGain();
+  osc.frequency.value = 880;
+  gain.gain.setValueAtTime(0.001, alertCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.35, alertCtx.currentTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, alertCtx.currentTime + 0.5);
+  osc.connect(gain);
+  gain.connect(alertCtx.destination);
+  osc.start();
+  osc.stop(alertCtx.currentTime + 0.5);
+}
+
 function wsUrl(path) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   return `${proto}://${location.host}${path}`;
@@ -106,15 +128,23 @@ chooseSongBtn.addEventListener('click', () => {
   stepSong.classList.add('hidden');
   stepSing.classList.remove('hidden');
   singStatus.textContent = 'Estás en la cola. Esperá a que la pantalla principal te llame.';
+
+  if (!alertCtx) alertCtx = new (window.AudioContext || window.webkitAudioContext)();
 });
 
 let hasStartedThisTurn = false;
+let previousSelfState = null;
 
 function onRoomState(data) {
   if (!userId || stepSing.classList.contains('hidden')) return;
 
   const self = data.users.find((u) => u.id === userId);
   if (!self) return;
+
+  if (self.state === 'called' && previousSelfState !== 'called') {
+    playCallAlert();
+  }
+  previousSelfState = self.state;
 
   if (self.state === 'called' && !hasStartedThisTurn) {
     startMicBtn.disabled = false;

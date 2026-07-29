@@ -13,6 +13,7 @@ const artistEl = document.getElementById('player-artist');
 const prevEl = document.getElementById('lyrics-prev');
 const currentEl = document.getElementById('lyrics-current');
 const nextEl = document.getElementById('lyrics-next');
+const progressFillEl = document.getElementById('progress-fill');
 
 let allSongs = [];
 let activeLines = [];
@@ -116,6 +117,7 @@ async function openSong(id) {
   }
 
   audioEl.src = song.mp3Url;
+  progressFillEl.style.width = '0%';
   catalogEl.classList.add('hidden');
   playerStage.classList.remove('hidden');
 
@@ -156,6 +158,11 @@ function stopPlayer() {
 
 backBtn.addEventListener('click', stopPlayer);
 audioEl.addEventListener('ended', stopPlayer);
+
+audioEl.addEventListener('timeupdate', () => {
+  if (!audioEl.duration) return;
+  progressFillEl.style.width = `${(audioEl.currentTime / audioEl.duration) * 100}%`;
+});
 
 loadCatalog();
 
