@@ -1,0 +1,17 @@
+services:
+  karaoke-server:
+    build: ./server
+    container_name: karaoke-server
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./songs:/library/local:ro
+      - ./server/src:/app/src:ro
+      - ./server/public:/app/public:ro
+      - karaoke-data:/data
+    command: node --watch src/index.js
+    restart: unless-stopped
+
+volumes:
+  karaoke-data:

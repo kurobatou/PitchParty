@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Karaoke — Sala</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="catalog-view" class="view">
+    <header class="topbar">
+      <h1>🎤 Sala de Karaoke</h1>
+      <input id="search" type="search" placeholder="Buscar canción o artista..." />
+    </header>
+    <main id="catalog" class="catalog"></main>
+  </div>
+
+  <div id="player-view" class="view hidden">
+    <div id="bg-fallback" class="bg-fallback"></div>
+    <video id="bg-video" class="bg-video hidden" muted playsinline></video>
+    <audio id="audio" preload="auto"></audio>
+
+    <button id="back-btn" class="back-btn">← Volver a la sala</button>
+
+    <div class="player-overlay">
+      <div class="song-info">
+        <span id="player-title"></span> — <span id="player-artist"></span>
+      </div>
+      <div class="lyrics">
+        <div id="lyrics-prev" class="lyrics-line lyrics-prev"></div>
+        <div id="lyrics-current" class="lyrics-line lyrics-current"></div>
+        <div id="lyrics-next" class="lyrics-line lyrics-next"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
