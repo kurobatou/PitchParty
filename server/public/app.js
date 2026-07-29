@@ -158,9 +158,12 @@ loadCatalog();
 const STATE_LABELS = {
   connected: 'Conectado',
   queued: 'En cola',
+  called: '¡Es su turno!',
   singing: 'Cantando',
   scored: 'Puntaje',
 };
+
+let roomWs = null;
 
 async function loadQr() {
   const joinUrl = `${location.origin}/join.html`;
@@ -197,23 +200,50 @@ function renderUsers(users) {
   }).join('');
 }
 
+function renderQueue(queueNicknames) {
+  const list = document.getElementById('queue-list');
+  list.innerHTML = queueNicknames.length === 0
+    ? '<li style="color:#9c9db3">Nadie en cola</li>'
+    : queueNicknames.map((name) => `<li>${escapeHtml(name)}</li>`).join('');
+}
+
+function renderRanking(ranking) {
+  const list = document.getElementById('ranking-list');
+  list.innerHTML = ranking.length === 0
+    ? '<li style="color:#9c9db3">Todavía nadie puntuó</li>'
+    : ranking.map((r) => {
+      const pct = r.max ? Math.round((r.total / r.max) * 100) : 0;
+      return `<li>${escapeHtml(r.nickname)} — ${pct}% <span style="color:#9c9db3">(${escapeHtml(r.songTitle ?? '')})</span></li>`;
+    }).join('');
+}
+
 function connectRoom() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${proto}://${location.host}/ws/room`);
+  roomWs = new WebSocket(`${proto}://${location.host}/ws/room`);
 
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type: 'join', nickname: 'Pantalla', role: 'screen' }));
+  roomWs.onopen = () => {
+    roomWs.send(JSON.stringify({ type: 'join', nickname: 'Pantalla', role: 'screen' }));
   };
 
-  ws.onmessage = (evt) => {
+  roomWs.onmessage = (evt) => {
     const data = JSON.parse(evt.data);
-    if (data.type === 'roomState') renderUsers(data.users);
+    if (data.type === 'roomState') {
+      renderUsers(data.users);
+      renderQueue(data.queue);
+      renderRanking(data.ranking);
+    }
   };
 
-  ws.onclose = () => {
+  roomWs.onclose = () => {
     setTimeout(connectRoom, 2000);
   };
 }
+
+document.getElementById('advance-btn').addEventListener('click', () => {
+  if (roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'advanceQueue' }));
+  }
+});
 
 loadQr();
 connectRoom();

@@ -143,8 +143,14 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
       room.update(userId, {
         songId: song?.id ?? null,
         songTitle: song ? `${song.artist} — ${song.title}` : null,
-        state: song ? 'queued' : 'connected',
       });
+      if (song) room.enqueue(userId);
+      room.broadcastState();
+      return;
+    }
+
+    if (msg.type === 'advanceQueue') {
+      room.advanceQueue();
       room.broadcastState();
       return;
     }
@@ -182,7 +188,8 @@ app.get('/ws/sing/:songId', { websocket: true }, (socket, req) => {
 
   const roomUserId = req.query.userId || null;
   if (roomUserId) {
-    room.update(roomUserId, { state: 'singing', songId: row.id, songTitle: `${row.artist} — ${row.title}` });
+    room.update(roomUserId, { songId: row.id, songTitle: `${row.artist} — ${row.title}` });
+    room.markSinging(roomUserId);
     room.broadcastState();
   }
 
@@ -209,7 +216,7 @@ app.get('/ws/sing/:songId', { websocket: true }, (socket, req) => {
         const parsed = JSON.parse(text);
         if (parsed.type === 'summary') {
           summaryReceived = true;
-          room.update(roomUserId, { state: 'scored', lastScore: { total: parsed.totalScore, max: parsed.maxScore } });
+          room.finishTurn(roomUserId, { total: parsed.totalScore, max: parsed.maxScore });
           room.broadcastState();
           if (engineSocket.readyState === WebSocket.OPEN) engineSocket.close();
         }
@@ -248,7 +255,7 @@ app.get('/ws/sing/:songId', { websocket: true }, (socket, req) => {
     if (roomUserId) {
       setTimeout(() => {
         if (!summaryReceived && room.users.get(roomUserId)?.state === 'singing') {
-          room.update(roomUserId, { state: 'connected' });
+          room.abandonTurn(roomUserId);
           room.broadcastState();
         }
       }, 1500);

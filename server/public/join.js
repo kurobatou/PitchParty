@@ -68,6 +68,8 @@ joinBtn.addEventListener('click', () => {
     } else if (data.type === 'pong') {
       const rtt = performance.now() - data.t0;
       roomWs.send(JSON.stringify({ type: 'reportLatency', ms: Math.round(rtt) }));
+    } else if (data.type === 'roomState') {
+      onRoomState(data);
     }
   };
 
@@ -101,10 +103,33 @@ chooseSongBtn.addEventListener('click', () => {
   roomWs.send(JSON.stringify({ type: 'chooseSong', songId: Number(selectedSongId) }));
   stepSong.classList.add('hidden');
   stepSing.classList.remove('hidden');
-  singStatus.textContent = 'Listo. Apretá "Empezar a cantar" cuando la pantalla principal arranque la canción.';
+  singStatus.textContent = 'Estás en la cola. Esperá a que la pantalla principal te llame.';
 });
 
+let hasStartedThisTurn = false;
+
+function onRoomState(data) {
+  if (!userId || stepSing.classList.contains('hidden')) return;
+
+  const self = data.users.find((u) => u.id === userId);
+  if (!self) return;
+
+  if (self.state === 'called' && !hasStartedThisTurn) {
+    startMicBtn.disabled = false;
+    singStatus.textContent = '¡Es tu turno! Apretá "Empezar a cantar".';
+  } else if (self.state === 'queued') {
+    const position = data.queue.indexOf(self.nickname) + 1;
+    startMicBtn.disabled = true;
+    singStatus.textContent = position > 0
+      ? `Esperando tu turno (posición ${position} en la cola)...`
+      : 'Esperando tu turno...';
+  } else if (self.state === 'scored') {
+    hasStartedThisTurn = false;
+  }
+}
+
 async function startMic() {
+  hasStartedThisTurn = true;
   mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   sourceNode = audioCtx.createMediaStreamSource(mediaStream);

@@ -123,6 +123,7 @@ html, body {
 
 .user-state.state-singing { color: #ffd23f; }
 .user-state.state-scored { color: #2ecc71; }
+.user-state.state-called { color: #ff9f43; font-weight: 700; }
 
 .latency-badge {
   font-size: 11px;
@@ -133,6 +134,34 @@ html, body {
 }
 
 .latency-badge.high { color: #ff6b6b; background: #3a2030; }
+
+.users-box ol {
+  margin: 0;
+  padding-left: 20px;
+  text-align: left;
+  font-size: 14px;
+}
+
+.users-box ol li {
+  padding: 4px 0;
+  border-bottom: none;
+}
+
+#advance-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #33344a;
+  background: #6c5ce7;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+#advance-btn:hover {
+  background: #5b4bd1;
+}
 
 .song-card {
   background: #171826;
