@@ -43,12 +43,96 @@ html, body {
   font-size: 16px;
 }
 
+.room-layout {
+  display: flex;
+  gap: 24px;
+  padding: 0 40px 40px;
+  align-items: flex-start;
+}
+
 .catalog {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 20px;
-  padding: 0 40px 40px;
+  flex: 1;
 }
+
+.room-panel {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.qr-box, .users-box {
+  background: #171826;
+  border: 1px solid #262740;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+.qr-box img {
+  width: 100%;
+  max-width: 220px;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+}
+
+.qr-caption {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #9c9db3;
+}
+
+.users-box h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  text-align: left;
+}
+
+.users-box ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.users-box li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #262740;
+  font-size: 14px;
+}
+
+.users-box li:last-child {
+  border-bottom: none;
+}
+
+.user-name {
+  font-weight: 600;
+}
+
+.user-state {
+  font-size: 12px;
+  color: #9c9db3;
+}
+
+.user-state.state-singing { color: #ffd23f; }
+.user-state.state-scored { color: #2ecc71; }
+
+.latency-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #262740;
+  color: #9c9db3;
+}
+
+.latency-badge.high { color: #ff6b6b; background: #3a2030; }
 
 .song-card {
   background: #171826;

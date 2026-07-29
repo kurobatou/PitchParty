@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Karaoke — Unirse a la sala</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .join-wrap {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 32px 20px;
+    }
+    .join-wrap h1 { font-size: 22px; }
+    .join-wrap input, .join-wrap select, .join-wrap button {
+      width: 100%;
+      font-size: 16px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid #33344a;
+      background: #171826;
+      color: #f2f2f6;
+      margin-top: 10px;
+      box-sizing: border-box;
+    }
+    .join-wrap button { cursor: pointer; }
+    .join-wrap button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .role-row { display: flex; gap: 10px; margin-top: 10px; }
+    .role-row button {
+      flex: 1;
+      background: #171826;
+    }
+    .role-row button.selected {
+      border-color: #6c5ce7;
+      background: #241f3d;
+    }
+    .hidden { display: none !important; }
+    .status-line { margin-top: 20px; color: #9c9db3; }
+    .score-box {
+      margin-top: 20px;
+      background: #171826;
+      border: 1px solid #262740;
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+    }
+    .score-box .big { font-size: 40px; font-weight: 700; color: #ffd23f; }
+  </style>
+</head>
+<body>
+  <div class="join-wrap">
+    <h1>🎤 Unirse a la sala</h1>
+
+    <div id="step-join">
+      <input id="nickname" type="text" placeholder="Tu nombre" maxlength="24" />
+      <div class="role-row">
+        <button id="role-singer" type="button">🎙️ Cantante</button>
+        <button id="role-guest" type="button">👀 Invitado</button>
+      </div>
+      <button id="join-btn" disabled>Entrar a la sala</button>
+    </div>
+
+    <div id="step-song" class="hidden">
+      <p class="status-line">Elegí una canción para cantar:</p>
+      <select id="song-select"></select>
+      <button id="choose-song-btn">Confirmar canción</button>
+    </div>
+
+    <div id="step-sing" class="hidden">
+      <p class="status-line" id="sing-status">Esperando...</p>
+      <button id="start-mic-btn">🎤 Empezar a cantar</button>
+      <button id="stop-mic-btn" disabled>■ Detener</button>
+
+      <div class="score-box">
+        <div>Puntaje</div>
+        <div class="big"><span id="score">0</span> / <span id="max-score">0</span></div>
+      </div>
+    </div>
+
+    <div id="step-guest" class="hidden">
+      <p class="status-line">Estás conectado como invitado. Vas a ver tu estado reflejado en la pantalla principal.</p>
+    </div>
+  </div>
+
+  <script src="/join.js" type="module"></script>
+</body>
+</html>

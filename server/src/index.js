@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import WebSocket from 'ws';
+import QRCode from 'qrcode';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -10,6 +11,7 @@ import { openDb, listSongs, getSongById } from './db.js';
 import { reindexLibrary } from './indexer.js';
 import { parseUsdxTxt, beatToMs } from './usdxParser.js';
 import { readUsdxTxtFile } from './txtEncoding.js';
+import { Room } from './room.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3000);
@@ -19,6 +21,7 @@ const ENGINE_WS_URL = process.env.ENGINE_WS_URL ?? 'ws://engine:8765';
 const app = Fastify({ logger: true });
 const db = openDb();
 const config = loadConfig();
+const room = new Room();
 
 reindexLibrary(db, config.libraryPaths, app.log);
 
@@ -67,6 +70,13 @@ app.post('/api/reindex', async () => {
   return reindexLibrary(db, config.libraryPaths, app.log);
 });
 
+app.get('/api/qr', async (request, reply) => {
+  const text = request.query.text;
+  if (!text) return reply.code(400).send({ error: 'missing "text" query param' });
+  const dataUrl = await QRCode.toDataURL(text, { margin: 1, width: 320 });
+  return { dataUrl };
+});
+
 const FILE_KINDS = {
   mp3: { column: 'mp3_path' },
   video: { column: 'video_path' },
@@ -105,6 +115,60 @@ function buildNotesPayload(row) {
   return notes;
 }
 
+// Room control channel: used by both the pantalla principal (role
+// "screen") and phones (role "guest"/"singer") to join, pick a song, and
+// receive the live connected-users list + a WebSocket-based latency ping.
+app.get('/ws/room', { websocket: true }, (socket, req) => {
+  let userId = null;
+
+  socket.on('message', (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+
+    if (msg.type === 'join') {
+      userId = room.join(socket, { nickname: msg.nickname, role: msg.role });
+      socket.send(JSON.stringify({ type: 'welcome', userId }));
+      room.broadcastState();
+      return;
+    }
+
+    if (!userId) return; // must join before anything else
+
+    if (msg.type === 'chooseSong') {
+      const song = getSongById(db, Number(msg.songId));
+      room.update(userId, {
+        songId: song?.id ?? null,
+        songTitle: song ? `${song.artist} — ${song.title}` : null,
+        state: song ? 'queued' : 'connected',
+      });
+      room.broadcastState();
+      return;
+    }
+
+    if (msg.type === 'ping') {
+      socket.send(JSON.stringify({ type: 'pong', t0: msg.t0 }));
+      return;
+    }
+
+    if (msg.type === 'reportLatency') {
+      room.update(userId, { latencyMs: msg.ms });
+      room.broadcastState();
+      return;
+    }
+  });
+
+  socket.on('close', () => {
+    if (userId) {
+      room.remove(userId);
+      room.broadcastState();
+    }
+  });
+});
+
 // Proxies mic audio from a browser/phone client to the Python scoring
 // engine, and relays score messages back. Kept as a thin relay so the
 // engine (and its scoring logic) stays fully containerized and reusable
@@ -116,11 +180,18 @@ app.get('/ws/sing/:songId', { websocket: true }, (socket, req) => {
     return;
   }
 
+  const roomUserId = req.query.userId || null;
+  if (roomUserId) {
+    room.update(roomUserId, { state: 'singing', songId: row.id, songTitle: `${row.artist} — ${row.title}` });
+    room.broadcastState();
+  }
+
   const notes = buildNotesPayload(row);
   const engineSocket = new WebSocket(ENGINE_WS_URL);
   const pending = [];
   let engineReady = false;
   let clientClosed = false;
+  let summaryReceived = false;
 
   engineSocket.on('open', () => {
     engineReady = true;
@@ -130,7 +201,22 @@ app.get('/ws/sing/:songId', { websocket: true }, (socket, req) => {
   });
 
   engineSocket.on('message', (data) => {
-    if (socket.readyState === WebSocket.OPEN) socket.send(data.toString());
+    const text = data.toString();
+    if (socket.readyState === WebSocket.OPEN) socket.send(text);
+
+    if (roomUserId) {
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed.type === 'summary') {
+          summaryReceived = true;
+          room.update(roomUserId, { state: 'scored', lastScore: { total: parsed.totalScore, max: parsed.maxScore } });
+          room.broadcastState();
+          if (engineSocket.readyState === WebSocket.OPEN) engineSocket.close();
+        }
+      } catch {
+        // ignore non-JSON/unexpected engine messages
+      }
+    }
   });
 
   engineSocket.on('close', () => {
@@ -153,7 +239,19 @@ app.get('/ws/sing/:songId', { websocket: true }, (socket, req) => {
     clientClosed = true;
     if (engineSocket.readyState === WebSocket.OPEN) {
       engineSocket.send(JSON.stringify({ type: 'stop' }));
-      engineSocket.close();
+      // Give the engine a moment to reply with "summary" before giving up
+      // on it and closing — closing immediately would race the reply.
+      setTimeout(() => {
+        if (engineSocket.readyState === WebSocket.OPEN) engineSocket.close();
+      }, 1500);
+    }
+    if (roomUserId) {
+      setTimeout(() => {
+        if (!summaryReceived && room.users.get(roomUserId)?.state === 'singing') {
+          room.update(roomUserId, { state: 'connected' });
+          room.broadcastState();
+        }
+      }, 1500);
     }
   });
 });

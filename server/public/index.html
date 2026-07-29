@@ -13,7 +13,19 @@
       <input id="search" type="search" placeholder="Buscar canción o artista..." />
       <a href="/sing.html" style="color:#9c9db3">Prueba de micrófono (Fase 1) →</a>
     </header>
-    <main id="catalog" class="catalog"></main>
+    <div class="room-layout">
+      <main id="catalog" class="catalog"></main>
+      <aside class="room-panel">
+        <div class="qr-box">
+          <img id="qr-img" alt="QR para unirse a la sala" />
+          <div class="qr-caption">Escaneá para unirte desde el celular</div>
+        </div>
+        <div class="users-box">
+          <h3>Conectados (<span id="users-count">0</span>)</h3>
+          <ul id="users-list"></ul>
+        </div>
+      </aside>
+    </div>
   </div>
 
   <div id="player-view" class="view hidden">

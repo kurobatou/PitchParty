@@ -152,3 +152,68 @@ backBtn.addEventListener('click', stopPlayer);
 audioEl.addEventListener('ended', stopPlayer);
 
 loadCatalog();
+
+// --- Sala: QR de acceso + lista de usuarios conectados en tiempo real ---
+
+const STATE_LABELS = {
+  connected: 'Conectado',
+  queued: 'En cola',
+  singing: 'Cantando',
+  scored: 'Puntaje',
+};
+
+async function loadQr() {
+  const joinUrl = `${location.origin}/join.html`;
+  const res = await fetch(`/api/qr?text=${encodeURIComponent(joinUrl)}`);
+  const { dataUrl } = await res.json();
+  document.getElementById('qr-img').src = dataUrl;
+}
+
+function renderUsers(users) {
+  const list = document.getElementById('users-list');
+  const count = document.getElementById('users-count');
+  count.textContent = users.length;
+
+  if (users.length === 0) {
+    list.innerHTML = '<li style="color:#9c9db3">Nadie conectado todavía</li>';
+    return;
+  }
+
+  list.innerHTML = users.map((u) => {
+    const stateLabel = STATE_LABELS[u.state] ?? u.state;
+    const scoreLabel = u.lastScore ? ` (${u.lastScore.total}/${u.lastScore.max})` : '';
+    const latencyLabel = u.latencyMs != null
+      ? `<span class="latency-badge ${u.latencyMs > 200 ? 'high' : ''}">${u.latencyMs}ms</span>`
+      : '';
+    return `
+      <li>
+        <span>
+          <div class="user-name">${escapeHtml(u.nickname)}</div>
+          <div class="user-state state-${u.state}">${escapeHtml(stateLabel)}${scoreLabel}</div>
+        </span>
+        ${latencyLabel}
+      </li>
+    `;
+  }).join('');
+}
+
+function connectRoom() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws/room`);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'join', nickname: 'Pantalla', role: 'screen' }));
+  };
+
+  ws.onmessage = (evt) => {
+    const data = JSON.parse(evt.data);
+    if (data.type === 'roomState') renderUsers(data.users);
+  };
+
+  ws.onclose = () => {
+    setTimeout(connectRoom, 2000);
+  };
+}
+
+loadQr();
+connectRoom();
