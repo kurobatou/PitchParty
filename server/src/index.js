@@ -1,17 +1,20 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
+import fastifyWebsocket from '@fastify/websocket';
+import WebSocket from 'ws';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { loadConfig } from './config.js';
 import { openDb, listSongs, getSongById } from './db.js';
 import { reindexLibrary } from './indexer.js';
-import { parseUsdxTxt } from './usdxParser.js';
+import { parseUsdxTxt, beatToMs } from './usdxParser.js';
 import { readUsdxTxtFile } from './txtEncoding.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? '0.0.0.0';
+const ENGINE_WS_URL = process.env.ENGINE_WS_URL ?? 'ws://engine:8765';
 
 const app = Fastify({ logger: true });
 const db = openDb();
@@ -23,6 +26,8 @@ await app.register(fastifyStatic, {
   root: join(__dirname, '..', 'public'),
   prefix: '/',
 });
+
+await app.register(fastifyWebsocket);
 
 function toPublicSong(row) {
   return {
@@ -78,6 +83,79 @@ app.get('/files/:id/:kind', async (request, reply) => {
   if (!path) return reply.code(404).send({ error: 'file not available' });
 
   return reply.sendFile(path, '/');
+});
+
+function buildNotesPayload(row) {
+  const raw = readUsdxTxtFile(row.txt_path);
+  const parsed = parseUsdxTxt(raw);
+  const notes = [];
+
+  for (const line of parsed.lines) {
+    if (line.type !== 'lyrics') continue;
+    for (const note of line.notes) {
+      notes.push({
+        type: note.type,
+        startMs: beatToMs(note.beat, row.bpm, row.gap),
+        endMs: beatToMs(note.beat + note.length, row.bpm, row.gap),
+        pitch: note.pitch,
+      });
+    }
+  }
+
+  return notes;
+}
+
+// Proxies mic audio from a browser/phone client to the Python scoring
+// engine, and relays score messages back. Kept as a thin relay so the
+// engine (and its scoring logic) stays fully containerized and reusable
+// across client types (test page now, phone PWA in Fase 2).
+app.get('/ws/sing/:songId', { websocket: true }, (socket, req) => {
+  const row = getSongById(db, Number(req.params.songId));
+  if (!row) {
+    socket.close(1008, 'song not found');
+    return;
+  }
+
+  const notes = buildNotesPayload(row);
+  const engineSocket = new WebSocket(ENGINE_WS_URL);
+  const pending = [];
+  let engineReady = false;
+  let clientClosed = false;
+
+  engineSocket.on('open', () => {
+    engineReady = true;
+    engineSocket.send(JSON.stringify({ type: 'start', sampleRate: 16000, notes }));
+    for (const msg of pending) engineSocket.send(msg);
+    pending.length = 0;
+  });
+
+  engineSocket.on('message', (data) => {
+    if (socket.readyState === WebSocket.OPEN) socket.send(data.toString());
+  });
+
+  engineSocket.on('close', () => {
+    if (!clientClosed && socket.readyState === WebSocket.OPEN) socket.close();
+  });
+
+  engineSocket.on('error', (err) => {
+    req.log.error({ err }, 'engine socket error');
+  });
+
+  socket.on('message', (data) => {
+    if (!engineReady) {
+      pending.push(data);
+      return;
+    }
+    engineSocket.send(data);
+  });
+
+  socket.on('close', () => {
+    clientClosed = true;
+    if (engineSocket.readyState === WebSocket.OPEN) {
+      engineSocket.send(JSON.stringify({ type: 'stop' }));
+      engineSocket.close();
+    }
+  });
 });
 
 try {

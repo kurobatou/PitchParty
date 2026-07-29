@@ -11,6 +11,19 @@ services:
       - ./server/public:/app/public:ro
       - karaoke-data:/data
     command: node --watch src/index.js
+    environment:
+      - ENGINE_WS_URL=ws://engine:8765
+    depends_on:
+      - engine
+    restart: unless-stopped
+
+  engine:
+    build: ./engine
+    container_name: karaoke-engine
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./engine/src:/app/src:ro
     restart: unless-stopped
 
 volumes:

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Karaoke — Prueba de micrófono (Fase 1)</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .sing-wrap {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 40px 24px;
+    }
+    .sing-wrap select, .sing-wrap button {
+      font-size: 16px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #33344a;
+      background: #171826;
+      color: #f2f2f6;
+      margin-right: 10px;
+    }
+    .sing-wrap button {
+      cursor: pointer;
+    }
+    .sing-wrap button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .score-box {
+      margin-top: 30px;
+      background: #171826;
+      border: 1px solid #262740;
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .score-box .big {
+      font-size: 48px;
+      font-weight: 700;
+      color: #ffd23f;
+    }
+    .pitch-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 16px;
+      font-size: 15px;
+      color: #9c9db3;
+    }
+    .hit-yes { color: #2ecc71; }
+    .hit-no { color: #ff6b6b; }
+  </style>
+</head>
+<body>
+  <div class="sing-wrap">
+    <h1>🎙️ Prueba de micrófono — motor de puntuación</h1>
+    <p style="color:#9c9db3">Herramienta de la Fase 1: captura el micrófono del navegador, la manda al motor Python vía WebSocket y muestra el puntaje en vivo. No forma parte todavía de la Sala.</p>
+
+    <div>
+      <select id="song-select"></select>
+      <button id="start-btn">🎤 Empezar a cantar</button>
+      <button id="stop-btn" disabled>■ Detener</button>
+    </div>
+
+    <div class="score-box">
+      <div>Puntaje</div>
+      <div class="big"><span id="score">0</span> / <span id="max-score">0</span></div>
+      <div class="pitch-row">
+        <span>Detectado: <span id="detected">-</span></span>
+        <span>Esperado: <span id="expected">-</span></span>
+        <span id="hit-indicator">-</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/sing.js" type="module"></script>
+</body>
+</html>
