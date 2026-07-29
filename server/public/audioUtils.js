@@ -29,6 +29,18 @@ export function midiToNoteName(midi) {
   return `${name}${octave}`;
 }
 
+// getUserMedia only works in a secure context (HTTPS or localhost). Warn
+// loudly instead of letting the mic button fail with a cryptic error.
+export function warnIfInsecureContext() {
+  const banner = document.getElementById('insecure-banner');
+  if (!banner || window.isSecureContext) return;
+
+  const hint = document.getElementById('https-hint');
+  if (hint) hint.textContent = `https://${location.host}${location.pathname}`;
+
+  banner.classList.remove('hidden');
+}
+
 export function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',

@@ -1,4 +1,6 @@
-import { downsampleTo16k, floatTo16BitPCM, escapeHtml } from './audioUtils.js';
+import { downsampleTo16k, floatTo16BitPCM, escapeHtml, warnIfInsecureContext } from './audioUtils.js';
+
+warnIfInsecureContext();
 
 const nicknameEl = document.getElementById('nickname');
 const roleSingerBtn = document.getElementById('role-singer');

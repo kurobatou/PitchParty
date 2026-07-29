@@ -1,3 +1,5 @@
+import { warnIfInsecureContext } from './audioUtils.js';
+
 const catalogView = document.getElementById('catalog-view');
 const playerView = document.getElementById('player-view');
 const catalogEl = document.getElementById('catalog');
@@ -292,3 +294,4 @@ document.getElementById('low-latency-toggle').addEventListener('click', () => {
 
 loadQr();
 connectRoom();
+warnIfInsecureContext();

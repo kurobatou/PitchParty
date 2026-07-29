@@ -13,6 +13,7 @@ services:
     command: node --watch src/index.js
     environment:
       - ENGINE_WS_URL=ws://engine:8765
+      - SERVER_LAN_IP=${SERVER_LAN_IP:-}
     depends_on:
       - engine
     restart: unless-stopped

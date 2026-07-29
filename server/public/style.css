@@ -199,6 +199,14 @@ html, body {
   border-color: #6c5ce7;
 }
 
+.insecure-banner {
+  background: #3a2030;
+  color: #ffb3b3;
+  padding: 10px 20px;
+  text-align: center;
+  font-size: 14px;
+}
+
 .song-card {
   background: #171826;
   border: 1px solid #262740;

@@ -1,4 +1,6 @@
-import { downsampleTo16k, floatTo16BitPCM, midiToNoteName, escapeHtml } from './audioUtils.js';
+import { downsampleTo16k, floatTo16BitPCM, midiToNoteName, escapeHtml, warnIfInsecureContext } from './audioUtils.js';
+
+warnIfInsecureContext();
 
 const songSelect = document.getElementById('song-select');
 const startBtn = document.getElementById('start-btn');

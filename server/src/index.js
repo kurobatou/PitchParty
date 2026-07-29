@@ -12,13 +12,22 @@ import { reindexLibrary } from './indexer.js';
 import { parseUsdxTxt, beatToMs } from './usdxParser.js';
 import { readUsdxTxtFile } from './txtEncoding.js';
 import { Room } from './room.js';
+import { getOrCreateCert } from './tls.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const ENGINE_WS_URL = process.env.ENGINE_WS_URL ?? 'ws://engine:8765';
+const LAN_IP = process.env.SERVER_LAN_IP;
 
-const app = Fastify({ logger: true });
+// Mic capture (getUserMedia) only works in a "secure context": HTTPS or
+// localhost. Phones on the LAN need the former, so when a LAN IP is
+// configured we serve everything over HTTPS with a self-signed cert
+// instead of plain HTTP (see tls.js for why).
+const app = Fastify({
+  logger: true,
+  https: LAN_IP ? getOrCreateCert(LAN_IP) : undefined,
+});
 const db = openDb();
 const config = loadConfig();
 const room = new Room();
@@ -273,6 +282,11 @@ app.get('/ws/sing/:songId', { websocket: true }, (socket, req) => {
 
 try {
   await app.listen({ port: PORT, host: HOST });
+  if (LAN_IP) {
+    app.log.info(`HTTPS enabled (self-signed) — open https://${LAN_IP}:${PORT} from the server and every phone`);
+  } else {
+    app.log.warn('SERVER_LAN_IP not set: serving plain HTTP — phone mic capture will NOT work (secure context required). See .env.example.');
+  }
 } catch (err) {
   app.log.error(err);
   process.exit(1);

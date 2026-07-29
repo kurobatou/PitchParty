@@ -6,3 +6,4 @@ server/*.db-journal
 server/*.db-wal
 server/*.db-shm
 /songs/
+.env
