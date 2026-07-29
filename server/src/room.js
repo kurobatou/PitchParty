@@ -15,6 +15,7 @@ export class Room {
     this.activeSingers = new Set(); // userIds currently "called" or "singing"
     this.ranking = []; // [{ nickname, songTitle, total, max, at }]
     this.lowLatencyMode = false;
+    this.nowPlaying = null; // { songId, songTitle } — drives Sala auto-playback
   }
 
   setLowLatencyMode(enabled) {
@@ -58,13 +59,16 @@ export class Room {
   }
 
   // Manual "avanzar rotación" from the Sala screen: pulls the next queued
-  // singer in, up to MAX_ACTIVE_SINGERS concurrent active turns.
+  // singer in, up to MAX_ACTIVE_SINGERS concurrent active turns, and tells
+  // the pantalla principal which song to start playing.
   advanceQueue() {
     if (this.activeSingers.size >= MAX_ACTIVE_SINGERS) return null;
     const nextId = this.queue.shift();
     if (!nextId) return null;
     this.activeSingers.add(nextId);
     this.update(nextId, { state: 'called' });
+    const user = this.users.get(nextId);
+    this.nowPlaying = { songId: user.songId, songTitle: user.songTitle };
     return nextId;
   }
 
@@ -88,12 +92,14 @@ export class Room {
       at: Date.now(),
     });
     this.ranking.sort((a, b) => (b.max ? b.total / b.max : 0) - (a.max ? a.total / a.max : 0));
+    if (this.activeSingers.size === 0) this.nowPlaying = null;
   }
 
   // Turn ended without a score (disconnect mid-song, etc).
   abandonTurn(id) {
     this.activeSingers.delete(id);
     if (this.users.has(id)) this.update(id, { state: 'connected' });
+    if (this.activeSingers.size === 0) this.nowPlaying = null;
   }
 
   toPublicList() {
@@ -118,6 +124,7 @@ export class Room {
       queue: this.queue.map((id) => this.users.get(id)?.nickname ?? '?'),
       ranking: this.ranking.slice(0, 10),
       lowLatencyMode: this.lowLatencyMode,
+      nowPlaying: this.nowPlaying,
     });
   }
 }

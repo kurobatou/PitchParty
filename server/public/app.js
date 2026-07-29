@@ -1,7 +1,6 @@
 import { warnIfInsecureContext } from './audioUtils.js';
 
-const catalogView = document.getElementById('catalog-view');
-const playerView = document.getElementById('player-view');
+const playerStage = document.getElementById('player-stage');
 const catalogEl = document.getElementById('catalog');
 const searchEl = document.getElementById('search');
 const backBtn = document.getElementById('back-btn');
@@ -18,6 +17,7 @@ const nextEl = document.getElementById('lyrics-next');
 let allSongs = [];
 let activeLines = [];
 let rafHandle = null;
+let currentSongId = null;
 
 function beatToMs(beat, bpm, gap) {
   const msPerBeat = 60000 / (bpm * 4);
@@ -85,6 +85,7 @@ async function openSong(id) {
   if (!res.ok) return;
   const song = await res.json();
 
+  currentSongId = song.id;
   titleEl.textContent = song.title;
   artistEl.textContent = song.artist;
 
@@ -115,8 +116,8 @@ async function openSong(id) {
   }
 
   audioEl.src = song.mp3Url;
-  catalogView.classList.add('hidden');
-  playerView.classList.remove('hidden');
+  catalogEl.classList.add('hidden');
+  playerStage.classList.remove('hidden');
 
   audioEl.play().catch(() => {});
   if (useVideo) bgVideoEl.play().catch(() => {});
@@ -148,8 +149,9 @@ function stopPlayer() {
   audioEl.removeAttribute('src');
   bgVideoEl.pause();
   bgVideoEl.removeAttribute('src');
-  playerView.classList.add('hidden');
-  catalogView.classList.remove('hidden');
+  currentSongId = null;
+  playerStage.classList.add('hidden');
+  catalogEl.classList.remove('hidden');
 }
 
 backBtn.addEventListener('click', stopPlayer);
@@ -249,6 +251,15 @@ function renderNetworkStatus(users) {
   }
 }
 
+let lastAutoPlayedSongId = null;
+
+function handleNowPlaying(nowPlaying) {
+  if (!nowPlaying || !nowPlaying.songId) return;
+  if (nowPlaying.songId === lastAutoPlayedSongId) return;
+  lastAutoPlayedSongId = nowPlaying.songId;
+  openSong(nowPlaying.songId);
+}
+
 function renderLowLatencyToggle(enabled) {
   lowLatencyMode = enabled;
   const btn = document.getElementById('low-latency-toggle');
@@ -272,6 +283,7 @@ function connectRoom() {
       renderRanking(data.ranking);
       renderNetworkStatus(data.users);
       renderLowLatencyToggle(data.lowLatencyMode);
+      handleNowPlaying(data.nowPlaying);
     }
   };
 
