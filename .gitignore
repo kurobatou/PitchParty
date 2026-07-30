@@ -7,3 +7,4 @@ server/*.db-wal
 server/*.db-shm
 /songs/
 .env
+.claude/settings.local.json
