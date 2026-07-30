@@ -1,8 +1,10 @@
 import selfsigned from 'selfsigned';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const CERT_DIR = process.env.CERT_DIR ?? '/data/certs';
+const DEFAULT_DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'data');
+const CERT_DIR = process.env.CERT_DIR ?? join(DEFAULT_DATA_DIR, 'certs');
 const IPV4_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
 /**

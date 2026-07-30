@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Karaoke — Configuración</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>⚙️ Configuración</h1>
+    <a href="/" style="color:#9c9db3">← Volver a la Sala</a>
+  </header>
+
+  <main class="settings-page">
+    <section class="settings-card">
+      <h2>Carpetas de canciones</h2>
+      <p class="settings-hint">
+        Cada carpeta debe contener una subcarpeta por canción (con su <code>.txt</code> de UltraStar).
+        Para agregar un NAS, primero montalo desde el sistema operativo (Finder/Explorador) y después
+        elegilo acá con "Buscar carpeta...".
+      </p>
+
+      <ul id="library-list" class="library-list"></ul>
+
+      <div class="settings-row">
+        <input id="new-path" type="text" placeholder="Ruta de carpeta (ej: /Volumes/NAS/Karaoke)" />
+        <button id="browse-btn" type="button">Buscar carpeta...</button>
+        <button id="add-path-btn" type="button">Agregar</button>
+      </div>
+
+      <div class="settings-row">
+        <button id="save-library-btn" type="button" class="primary-btn">Guardar y reindexar</button>
+        <span id="library-status" class="settings-status"></span>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <h2>Dirección IP del servidor</h2>
+      <p class="settings-hint">
+        Se detecta automáticamente al arrancar el servidor. Solo hace falta forzarla a mano si tenés
+        varias redes activas (Wi-Fi + Ethernet, VPN, etc.) y detecta la que no es.
+      </p>
+      <div class="settings-row">
+        <span class="settings-label">Detectada:</span>
+        <span id="detected-ip">—</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">En uso ahora:</span>
+        <span id="effective-ip">—</span>
+      </div>
+      <div class="settings-row">
+        <input id="ip-override" type="text" placeholder="Forzar IP (opcional)" />
+        <button id="save-ip-btn" type="button" class="primary-btn">Guardar</button>
+      </div>
+      <div class="settings-row">
+        <span id="ip-status" class="settings-status"></span>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <h2>Certificado HTTPS con dominio propio (opcional)</h2>
+      <p class="settings-hint">
+        Por defecto se usa un certificado autofirmado (pide aceptar una advertencia una vez por
+        dispositivo). Si tenés un dominio propio administrado en <strong>Cloudflare</strong>, podés
+        conseguir acá un certificado real de Let's Encrypt — se valida por DNS, así que
+        <strong>no hace falta exponer este servidor a internet</strong> para conseguirlo. Necesitás un
+        subdominio (ej: <code>karaoke.tudominio.com</code>) y un token de API de Cloudflare con permiso
+        <code>Zone:DNS:Edit</code> sobre esa zona.
+      </p>
+      <div class="settings-row">
+        <input id="public-domain" type="text" placeholder="karaoke.tudominio.com" />
+      </div>
+      <div class="settings-row">
+        <input id="cloudflare-token" type="password" placeholder="Token de API de Cloudflare" />
+      </div>
+      <div class="settings-row">
+        <input id="acme-email" type="text" placeholder="Email de contacto (opcional, recomendado)" />
+      </div>
+      <div class="settings-row">
+        <button id="save-cert-btn" type="button" class="primary-btn">Guardar y generar certificado</button>
+        <span id="cert-status" class="settings-status"></span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Certificado actual:</span>
+        <span id="cert-info">—</span>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/settings.js"></script>
+</body>
+</html>

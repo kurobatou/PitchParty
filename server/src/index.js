@@ -1,10 +1,10 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
-import WebSocket from 'ws';
 import QRCode from 'qrcode';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 
 import { loadConfig } from './config.js';
 import { openDb, listSongs, getSongById } from './db.js';
@@ -13,26 +13,80 @@ import { parseUsdxTxt, beatToMs } from './usdxParser.js';
 import { readUsdxTxtFile } from './txtEncoding.js';
 import { Room } from './room.js';
 import { getOrCreateCert } from './tls.js';
+import { ensureLetsEncryptCert } from './certManager.js';
+import { loadSettings, saveSettings } from './settings.js';
+import { detectPitch } from './pitch.js';
+import { ScoringSession, notesFromSongPayload } from './scoring.js';
+import { detectLanIp } from './netinfo.js';
+import { browseForFolder } from './folderDialog.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(__dirname, '..', '..');
 const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? '0.0.0.0';
-const ENGINE_WS_URL = process.env.ENGINE_WS_URL ?? 'ws://engine:8765';
-const LAN_IP = process.env.SERVER_LAN_IP;
+const ANALYSIS_WINDOW_SAMPLES = 2048; // ~128ms at 16kHz, matches the old Python engine
+const DETECTED_LAN_IP = process.env.SERVER_LAN_IP || detectLanIp();
+
+// Paths typed in the settings UI or config.json may be relative (e.g.
+// "./songs"); resolve them against the repo root so the indexer always
+// gets absolute paths regardless of the process's cwd.
+function resolveLibraryPath(p) {
+  return isAbsolute(p) ? p : resolve(REPO_ROOT, p);
+}
+
+const config = loadConfig();
+let settings = loadSettings(config);
+
+// A manual override saved from the settings UI wins over the LAN IP
+// start.sh auto-detected for this machine — useful when a host has
+// several network interfaces and auto-detect picks the wrong one.
+const LAN_IP = settings.lanIpOverride || DETECTED_LAN_IP || null;
 
 // Mic capture (getUserMedia) only works in a "secure context": HTTPS or
-// localhost. Phones on the LAN need the former, so when a LAN IP is
-// configured we serve everything over HTTPS with a self-signed cert
-// instead of plain HTTP (see tls.js for why).
+// localhost. Phones on the LAN need the former, so we serve everything
+// over HTTPS. Prefer a real, browser-trusted cert (Let's Encrypt via
+// Cloudflare DNS-01, see certManager.js) when the user configured a
+// domain for it — no more "unsafe site" click-through — falling back to
+// the self-signed one for the detected LAN IP otherwise.
+let httpsOptions;
+let certInfo = null;
+if (settings.publicDomain && settings.cloudflareApiToken) {
+  try {
+    const { key, cert, validUntil } = await ensureLetsEncryptCert({
+      domain: settings.publicDomain,
+      cloudflareApiToken: settings.cloudflareApiToken,
+      email: settings.acmeEmail || undefined,
+    });
+    httpsOptions = { key, cert };
+    certInfo = { type: 'letsencrypt', domain: settings.publicDomain, validUntil };
+    console.log(`Using Let's Encrypt cert for ${settings.publicDomain} (valid until ${validUntil})`);
+  } catch (err) {
+    console.error("Let's Encrypt cert setup failed, falling back to self-signed:", err.message);
+  }
+}
+if (!httpsOptions && LAN_IP) {
+  httpsOptions = getOrCreateCert(LAN_IP);
+  certInfo = { type: 'self-signed', lanIp: LAN_IP };
+}
+
 const app = Fastify({
   logger: true,
-  https: LAN_IP ? getOrCreateCert(LAN_IP) : undefined,
+  https: httpsOptions,
 });
 const db = openDb();
-const config = loadConfig();
 const room = new Room();
 
-reindexLibrary(db, config.libraryPaths, app.log);
+// Lets the Sala tell the server "this turn's playback ended" (see the
+// 'endTurn' message on /ws/room) so the matching /ws/sing session finishes
+// with a summary instead of streaming mic audio forever. Keyed by room
+// userId, populated while that user's /ws/sing socket is open.
+const activeSingSessions = new Map();
+
+function currentLibraryPaths() {
+  return settings.libraryPaths.map(resolveLibraryPath);
+}
+
+reindexLibrary(db, currentLibraryPaths(), app.log);
 
 await app.register(fastifyStatic, {
   root: join(__dirname, '..', 'public'),
@@ -76,7 +130,103 @@ app.get('/api/songs/:id', async (request, reply) => {
 });
 
 app.post('/api/reindex', async () => {
-  return reindexLibrary(db, config.libraryPaths, app.log);
+  return reindexLibrary(db, currentLibraryPaths(), app.log);
+});
+
+app.get('/api/settings', async () => {
+  return {
+    libraryPaths: settings.libraryPaths,
+    libraryPathStatus: settings.libraryPaths.map((p) => ({
+      path: p,
+      exists: existsSync(resolveLibraryPath(p)),
+    })),
+    lanIpOverride: settings.lanIpOverride,
+    detectedLanIp: DETECTED_LAN_IP,
+    effectiveLanIp: LAN_IP,
+    publicDomain: settings.publicDomain,
+    acmeEmail: settings.acmeEmail,
+    cloudflareTokenSet: Boolean(settings.cloudflareApiToken),
+    certInfo,
+  };
+});
+
+app.put('/api/settings', async (request, reply) => {
+  const body = request.body ?? {};
+  const next = { ...settings };
+
+  if (body.libraryPaths !== undefined) {
+    if (!Array.isArray(body.libraryPaths) || body.libraryPaths.some((p) => typeof p !== 'string' || !p.trim())) {
+      return reply.code(400).send({ error: 'libraryPaths must be a non-empty array of strings' });
+    }
+    next.libraryPaths = body.libraryPaths.map((p) => p.trim());
+  }
+
+  if (body.lanIpOverride !== undefined) {
+    next.lanIpOverride = body.lanIpOverride ? String(body.lanIpOverride).trim() : null;
+  }
+
+  if (body.publicDomain !== undefined) {
+    next.publicDomain = body.publicDomain ? String(body.publicDomain).trim() : null;
+  }
+  if (body.cloudflareApiToken !== undefined) {
+    next.cloudflareApiToken = body.cloudflareApiToken ? String(body.cloudflareApiToken).trim() : null;
+  }
+  if (body.acmeEmail !== undefined) {
+    next.acmeEmail = body.acmeEmail ? String(body.acmeEmail).trim() : null;
+  }
+
+  settings = next;
+  saveSettings(settings);
+
+  const result = body.libraryPaths !== undefined
+    ? reindexLibrary(db, currentLibraryPaths(), app.log)
+    : null;
+
+  // Issuing/renewing the cert happens right away (so a bad token/domain
+  // fails fast, in the response), but it only takes effect on the next
+  // restart — HTTPS options are fixed when the process boots.
+  let certAttempt = null;
+  const wantsCertCheck = body.publicDomain !== undefined || body.cloudflareApiToken !== undefined;
+  if (wantsCertCheck && settings.publicDomain && settings.cloudflareApiToken) {
+    try {
+      const { validUntil } = await ensureLetsEncryptCert({
+        domain: settings.publicDomain,
+        cloudflareApiToken: settings.cloudflareApiToken,
+        email: settings.acmeEmail || undefined,
+      });
+      certAttempt = { ok: true, validUntil };
+    } catch (err) {
+      certAttempt = { ok: false, error: err.message };
+    }
+  }
+
+  return {
+    libraryPaths: settings.libraryPaths,
+    libraryPathStatus: settings.libraryPaths.map((p) => ({
+      path: p,
+      exists: existsSync(resolveLibraryPath(p)),
+    })),
+    lanIpOverride: settings.lanIpOverride,
+    detectedLanIp: DETECTED_LAN_IP,
+    effectiveLanIp: LAN_IP,
+    lanIpRestartRequired: body.lanIpOverride !== undefined && next.lanIpOverride !== LAN_IP,
+    publicDomain: settings.publicDomain,
+    acmeEmail: settings.acmeEmail,
+    cloudflareTokenSet: Boolean(settings.cloudflareApiToken),
+    certAttempt,
+    certRestartRequired: certAttempt?.ok === true,
+    reindex: result,
+  };
+});
+
+app.post('/api/browse-folder', async (request, reply) => {
+  try {
+    const path = await browseForFolder();
+    return { path };
+  } catch (err) {
+    app.log.warn({ err }, 'native folder dialog unavailable');
+    return reply.code(501).send({ error: 'no native folder dialog available on this OS' });
+  }
 });
 
 app.get('/api/qr', async (request, reply) => {
@@ -164,6 +314,26 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
       return;
     }
 
+    // Sent by the pantalla principal when its <audio> playback for the
+    // current turn ends (naturally or via "Volver al catálogo"), so the
+    // singer's phone stops capturing mic audio and gets a final score
+    // instead of streaming indefinitely.
+    if (msg.type === 'endTurn') {
+      const user = room.users.get(userId);
+      if (user?.role !== 'screen') return;
+
+      const session = activeSingSessions.get(msg.userId);
+      if (session) {
+        session.stopWithSummary();
+      } else if (room.users.has(msg.userId)) {
+        // Phone hadn't opened its /ws/sing socket yet (still starting the
+        // mic) — don't leave them stuck in "called"/"singing" forever.
+        room.abandonTurn(msg.userId);
+        room.broadcastState();
+      }
+      return;
+    }
+
     if (msg.type === 'toggleLowLatency') {
       const user = room.users.get(userId);
       if (user?.role !== 'screen') return; // only the pantalla principal controls this (plan §9)
@@ -192,10 +362,13 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
   });
 });
 
-// Proxies mic audio from a browser/phone client to the Python scoring
-// engine, and relays score messages back. Kept as a thin relay so the
-// engine (and its scoring logic) stays fully containerized and reusable
-// across client types (test page now, phone PWA in Fase 2).
+const SING_SAMPLE_RATE = 16000;
+const FRAME_BYTES = ANALYSIS_WINDOW_SAMPLES * 2; // int16 = 2 bytes/sample
+
+// Scores mic audio from a browser/phone client in-process (used to relay
+// to a separate Python engine container; ported to JS so the whole app
+// runs as one plain Node process, no Docker required — see pitch.js /
+// scoring.js).
 app.get('/ws/sing/:songId', { websocket: true }, (socket, req) => {
   const row = getSongById(db, Number(req.params.songId));
   if (!row) {
@@ -210,82 +383,81 @@ app.get('/ws/sing/:songId', { websocket: true }, (socket, req) => {
     room.broadcastState();
   }
 
-  const notes = buildNotesPayload(row);
-  const engineSocket = new WebSocket(ENGINE_WS_URL);
-  const pending = [];
-  let engineReady = false;
-  let clientClosed = false;
-  let summaryReceived = false;
+  const notes = notesFromSongPayload(buildNotesPayload(row));
+  const session = new ScoringSession(notes);
+  req.log.info({ notes: notes.length, maxScore: session.maxScore }, 'sing session started');
 
-  engineSocket.on('open', () => {
-    engineReady = true;
-    engineSocket.send(JSON.stringify({ type: 'start', sampleRate: 16000, notes }));
-    for (const msg of pending) engineSocket.send(msg);
-    pending.length = 0;
-  });
+  let buffer = Buffer.alloc(0);
+  let samplesProcessed = 0;
+  let stopped = false;
 
-  engineSocket.on('message', (data) => {
-    const text = data.toString();
-    if (socket.readyState === WebSocket.OPEN) socket.send(text);
+  if (roomUserId) activeSingSessions.set(roomUserId, { stopWithSummary });
 
+  function stopWithSummary() {
+    if (stopped) return;
+    stopped = true;
+    if (roomUserId) activeSingSessions.delete(roomUserId);
+    const summary = { type: 'summary', totalScore: session.totalScore, maxScore: session.maxScore };
+    if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(summary));
     if (roomUserId) {
-      try {
-        const parsed = JSON.parse(text);
-        if (parsed.type === 'summary') {
-          summaryReceived = true;
-          room.finishTurn(roomUserId, { total: parsed.totalScore, max: parsed.maxScore });
-          room.broadcastState();
-          if (engineSocket.readyState === WebSocket.OPEN) engineSocket.close();
-        }
-      } catch {
-        // ignore non-JSON/unexpected engine messages
-      }
+      room.finishTurn(roomUserId, { total: summary.totalScore, max: summary.maxScore });
+      room.broadcastState();
     }
-  });
+  }
 
-  engineSocket.on('close', () => {
-    if (!clientClosed && socket.readyState === WebSocket.OPEN) socket.close();
-  });
-
-  engineSocket.on('error', (err) => {
-    req.log.error({ err }, 'engine socket error');
-  });
-
-  socket.on('message', (data) => {
-    if (!engineReady) {
-      pending.push(data);
+  socket.on('message', (data, isBinary) => {
+    if (!isBinary) {
+      let msg;
+      try {
+        msg = JSON.parse(data.toString());
+      } catch {
+        return;
+      }
+      if (msg.type === 'stop') stopWithSummary();
       return;
     }
-    engineSocket.send(data);
+
+    buffer = Buffer.concat([buffer, data]);
+
+    while (buffer.length >= FRAME_BYTES) {
+      const chunk = buffer.subarray(0, FRAME_BYTES);
+      buffer = buffer.subarray(FRAME_BYTES);
+
+      const samples = new Float32Array(ANALYSIS_WINDOW_SAMPLES);
+      for (let i = 0; i < ANALYSIS_WINDOW_SAMPLES; i++) {
+        samples[i] = chunk.readInt16LE(i * 2) / 32768.0;
+      }
+
+      const freq = detectPitch(samples, SING_SAMPLE_RATE);
+      samplesProcessed += ANALYSIS_WINDOW_SAMPLES;
+      const elapsedMs = (samplesProcessed / SING_SAMPLE_RATE) * 1000.0;
+
+      const result = session.scoreFrame(elapsedMs, freq);
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(result));
+    }
   });
 
+  // A client that disconnects without sending "stop" (dropped connection,
+  // closed tab) didn't finish the song — mark the turn abandoned rather
+  // than crediting a final score, matching the old relay's behavior.
   socket.on('close', () => {
-    clientClosed = true;
-    if (engineSocket.readyState === WebSocket.OPEN) {
-      engineSocket.send(JSON.stringify({ type: 'stop' }));
-      // Give the engine a moment to reply with "summary" before giving up
-      // on it and closing — closing immediately would race the reply.
-      setTimeout(() => {
-        if (engineSocket.readyState === WebSocket.OPEN) engineSocket.close();
-      }, 1500);
-    }
-    if (roomUserId) {
-      setTimeout(() => {
-        if (!summaryReceived && room.users.get(roomUserId)?.state === 'singing') {
-          room.abandonTurn(roomUserId);
-          room.broadcastState();
-        }
-      }, 1500);
+    if (roomUserId) activeSingSessions.delete(roomUserId);
+    if (stopped) return;
+    if (roomUserId && room.users.get(roomUserId)?.state === 'singing') {
+      room.abandonTurn(roomUserId);
+      room.broadcastState();
     }
   });
 });
 
 try {
   await app.listen({ port: PORT, host: HOST });
-  if (LAN_IP) {
-    app.log.info(`HTTPS enabled (self-signed) — open https://${LAN_IP}:${PORT} from the server and every phone`);
+  if (certInfo?.type === 'letsencrypt') {
+    app.log.info(`HTTPS enabled (Let's Encrypt, trusted) — open https://${certInfo.domain}:${PORT} from the server and every phone`);
+  } else if (certInfo?.type === 'self-signed') {
+    app.log.info(`HTTPS enabled (self-signed) — open https://${certInfo.lanIp}:${PORT} from the server and every phone`);
   } else {
-    app.log.warn('SERVER_LAN_IP not set: serving plain HTTP — phone mic capture will NOT work (secure context required). See .env.example.');
+    app.log.warn('No LAN IP detected and no Let\'s Encrypt domain configured: serving plain HTTP — phone mic capture will NOT work (secure context required).');
   }
 } catch (err) {
   app.log.error(err);

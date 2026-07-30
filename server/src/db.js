@@ -1,8 +1,13 @@
 import Database from 'better-sqlite3';
+import { mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const DB_PATH = process.env.DB_PATH ?? '/data/karaoke.db';
+const DEFAULT_DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'data');
+const DB_PATH = process.env.DB_PATH ?? join(DEFAULT_DATA_DIR, 'karaoke.db');
 
 export function openDb() {
+  mkdirSync(dirname(DB_PATH), { recursive: true });
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
 

@@ -68,7 +68,7 @@ export class Room {
     this.activeSingers.add(nextId);
     this.update(nextId, { state: 'called' });
     const user = this.users.get(nextId);
-    this.nowPlaying = { songId: user.songId, songTitle: user.songTitle };
+    this.nowPlaying = { userId: nextId, songId: user.songId, songTitle: user.songTitle };
     return nextId;
   }
 

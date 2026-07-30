@@ -30,50 +30,219 @@ function lineText(line) {
   return line.notes.map((n) => n.text).join('');
 }
 
-// Songs without their own video fall back to bars driven by the actual
-// playback audio (Web Audio AnalyserNode) instead of a flat gradient.
-// createMediaElementSource can only be called once per <audio> element,
-// so this graph is built lazily the first time and reused for every song.
+// Songs without their own video fall back to a visual driven by the
+// actual playback audio (Web Audio AnalyserNode) instead of a flat
+// gradient. Once created, audioEl's sound is routed ENTIRELY through this
+// graph (createMediaElementSource reroutes it — audioEl no longer plays
+// straight to speakers on its own), so if this AudioContext ever gets
+// stuck "suspended" by the browser's autoplay policy, that song goes
+// completely silent, not just visually flat.
+//
+// AudioContext.resume() only reliably unlocks when called synchronously
+// inside a real user gesture handler (click/keydown) — NOT from inside an
+// async callback several microtasks removed from one, which is exactly
+// what happens when a song opens via handleNowPlaying (triggered by a
+// WebSocket message, no gesture at all) or after an `await fetch(...)` in
+// openSong(). So the graph is built and unlocked as early as possible, on
+// the very first real interaction anywhere on this page — by the time any
+// song opens, it's already unlocked.
 let vizAudioCtx = null;
 let analyser = null;
-let analyserData = null;
+let freqData = null;
+let timeData = null;
 let wavesCanvasCtx = null;
+let vizFailed = false;
 
 function ensureAudioGraph() {
-  if (vizAudioCtx) return;
-  vizAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const source = vizAudioCtx.createMediaElementSource(audioEl);
-  analyser = vizAudioCtx.createAnalyser();
-  analyser.fftSize = 128;
-  analyser.smoothingTimeConstant = 0.75;
-  source.connect(analyser);
-  analyser.connect(vizAudioCtx.destination);
-  analyserData = new Uint8Array(analyser.frequencyBinCount);
-  wavesCanvasCtx = bgWavesEl.getContext('2d');
-  drawWaves();
+  if (vizAudioCtx || vizFailed) return;
+  try {
+    vizAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = vizAudioCtx.createMediaElementSource(audioEl);
+    analyser = vizAudioCtx.createAnalyser();
+    analyser.fftSize = 128;
+    analyser.smoothingTimeConstant = 0.75;
+    source.connect(analyser);
+    analyser.connect(vizAudioCtx.destination);
+    freqData = new Uint8Array(analyser.frequencyBinCount);
+    timeData = new Uint8Array(analyser.fftSize);
+    wavesCanvasCtx = bgWavesEl.getContext('2d');
+    drawWaves();
+  } catch (err) {
+    console.warn('audio visualizer unavailable, using plain gradient background', err);
+    vizFailed = true;
+  }
 }
+
+function unlockPlaybackAudio() {
+  ensureAudioGraph();
+  vizAudioCtx?.resume().catch(() => {});
+  document.getElementById('audio-unlock-banner')?.classList.add('hidden');
+}
+
+// once:false — resume() is a no-op once already running, and re-unlocking
+// on every early interaction is cheap insurance against a suspended
+// context (e.g. the tab regained focus after being backgrounded). The
+// banner (see index.html) exists so a fully hands-off Sala — nobody ever
+// clicking the TV directly, only phones — still gets one deliberate tap.
+document.addEventListener('pointerdown', unlockPlaybackAudio);
+document.addEventListener('keydown', unlockPlaybackAudio);
+
+// A handful of distinct looks so 200+ songs without video don't all render
+// the same pattern. Picked deterministically from the song id so a given
+// song always looks the same, but the catalog as a whole rotates through
+// all of them.
+const VIZ_THEMES = [drawBars, drawMirrorBars, drawRadial, drawScope];
+let currentTheme = drawBars;
+let themeHue = 255;
+
+function pickTheme(songId) {
+  currentTheme = VIZ_THEMES[songId % VIZ_THEMES.length];
+  themeHue = (songId * 47) % 360;
+}
+
+// Temporary on-screen readout (no devtools needed — useful on TVs/set-top
+// boxes) showing whether the audio graph is actually alive and receiving
+// signal. Safe to remove once the visualizer is confirmed working
+// everywhere.
+const vizDebugEl = document.getElementById('viz-debug');
+let debugFrameCount = 0;
 
 function drawWaves() {
   requestAnimationFrame(drawWaves);
-  if (bgWavesEl.classList.contains('hidden')) return;
 
-  analyser.getByteFrequencyData(analyserData);
+  debugFrameCount++;
+  if (vizDebugEl && debugFrameCount % 15 === 0) {
+    if (vizFailed) {
+      vizDebugEl.textContent = 'viz: failed to init (ver consola)';
+    } else if (!vizAudioCtx) {
+      vizDebugEl.textContent = 'viz: sin inicializar (tocá la pantalla)';
+    } else {
+      const avgFreq = freqData ? freqData.reduce((a, b) => a + b, 0) / freqData.length : 0;
+      vizDebugEl.textContent = `viz: ctx=${vizAudioCtx.state} canvas=${bgWavesEl.width}x${bgWavesEl.height} amp=${avgFreq.toFixed(1)}`;
+    }
+  }
+
+  if (bgWavesEl.classList.contains('hidden') || !analyser) return;
+
+  analyser.getByteFrequencyData(freqData);
+  analyser.getByteTimeDomainData(timeData);
   const { width, height } = bgWavesEl;
   wavesCanvasCtx.clearRect(0, 0, width, height);
+  currentTheme(wavesCanvasCtx, width, height, freqData, timeData, themeHue);
+}
 
-  const barCount = analyserData.length;
+function drawBars(ctx, width, height, freq, time, hue) {
+  const barCount = freq.length;
   const barWidth = width / barCount;
   for (let i = 0; i < barCount; i++) {
-    const barHeight = (analyserData[i] / 255) * height * 0.85;
-    wavesCanvasCtx.fillStyle = `hsl(${255 + i * 1.5}, 70%, 60%)`;
-    wavesCanvasCtx.fillRect(i * barWidth, height - barHeight, barWidth - 1, barHeight);
+    const barHeight = (freq[i] / 255) * height * 0.85;
+    ctx.fillStyle = `hsl(${hue + i * 1.5}, 70%, 60%)`;
+    ctx.fillRect(i * barWidth, height - barHeight, barWidth - 1, barHeight);
   }
+}
+
+function drawMirrorBars(ctx, width, height, freq, time, hue) {
+  const barCount = freq.length;
+  const barWidth = width / barCount;
+  const mid = height / 2;
+  for (let i = 0; i < barCount; i++) {
+    const barHeight = (freq[i] / 255) * mid * 0.9;
+    ctx.fillStyle = `hsl(${hue + i * 1.5}, 75%, 65%)`;
+    ctx.fillRect(i * barWidth, mid - barHeight, barWidth - 1, barHeight * 2);
+  }
+}
+
+function drawRadial(ctx, width, height, freq, time, hue) {
+  const cx = width / 2;
+  const cy = height / 2;
+  const maxRadius = Math.min(width, height) * 0.42;
+  const rings = 24;
+  ctx.lineWidth = 3;
+  for (let i = 0; i < rings; i++) {
+    const amp = freq[i % freq.length] / 255;
+    const radius = (i / rings) * maxRadius + amp * 24;
+    ctx.strokeStyle = `hsla(${(hue + i * 10) % 360}, 75%, 65%, ${0.15 + amp * 0.5})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawScope(ctx, width, height, freq, time, hue) {
+  const mid = height / 2;
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = `hsl(${hue}, 80%, 65%)`;
+  ctx.beginPath();
+  const step = width / time.length;
+  for (let i = 0; i < time.length; i++) {
+    const y = mid + ((time[i] - 128) / 128) * mid * 0.8;
+    const x = i * step;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Soft glow dots along a few frequency bins for extra texture.
+  const dotCount = 16;
+  for (let i = 0; i < dotCount; i++) {
+    const amp = freq[i * 4] / 255;
+    const x = (i / dotCount) * width;
+    ctx.fillStyle = `hsla(${(hue + i * 20) % 360}, 80%, 65%, ${0.3 + amp * 0.5})`;
+    ctx.beginPath();
+    ctx.arc(x, mid - amp * mid * 0.9, 3 + amp * 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+const letterIndexEl = document.getElementById('letter-index');
+let activeLetter = null;
+
+function artistLetter(artist) {
+  const c = (artist || '').trim().charAt(0).toUpperCase();
+  // Strip accents (é→E, ñ→N...) so songs group under the plain letter.
+  const plain = c.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  return /[A-Z]/.test(plain) ? plain : '#';
 }
 
 async function loadCatalog() {
   const res = await fetch('/api/songs');
   allSongs = await res.json();
-  renderCatalog(allSongs);
+  renderLetterIndex();
+  applyFilters();
+}
+
+// Only the catalog is large enough (200+ songs with a NAS library) to
+// warrant a jump index — build it from the letters actually present
+// instead of always showing the full alphabet.
+function renderLetterIndex() {
+  const present = new Set(allSongs.map((s) => artistLetter(s.artist)));
+  if (present.size < 8) {
+    letterIndexEl.innerHTML = '';
+    return;
+  }
+
+  const letters = ['#', ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split('')].filter((l) => present.has(l));
+  letterIndexEl.innerHTML = letters.map((l) =>
+    `<button type="button" class="letter-btn${l === activeLetter ? ' active' : ''}" data-letter="${l}">${l}</button>`
+  ).join('');
+
+  letterIndexEl.querySelectorAll('.letter-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      activeLetter = activeLetter === btn.dataset.letter ? null : btn.dataset.letter;
+      renderLetterIndex();
+      applyFilters();
+    });
+  });
+}
+
+function applyFilters() {
+  const q = searchEl.value.trim().toLowerCase();
+  const filtered = allSongs.filter((s) => {
+    const matchesQuery = !q || s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q);
+    const matchesLetter = !activeLetter || artistLetter(s.artist) === activeLetter;
+    return matchesQuery && matchesLetter;
+  });
+  renderCatalog(filtered);
 }
 
 function renderCatalog(songs) {
@@ -115,12 +284,7 @@ function escapeHtml(str) {
   }[c]));
 }
 
-searchEl.addEventListener('input', () => {
-  const q = searchEl.value.trim().toLowerCase();
-  const filtered = allSongs.filter((s) =>
-    s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q));
-  renderCatalog(filtered);
-});
+searchEl.addEventListener('input', applyFilters);
 
 async function openSong(id) {
   const res = await fetch(`/api/songs/${id}`);
@@ -164,8 +328,8 @@ async function openSong(id) {
     bgWavesEl.classList.remove('hidden');
     bgWavesEl.width = bgWavesEl.clientWidth;
     bgWavesEl.height = bgWavesEl.clientHeight;
-    ensureAudioGraph();
-    vizAudioCtx.resume();
+    pickTheme(song.id);
+    unlockPlaybackAudio();
   }
 
   audioEl.play().catch(() => {});
@@ -201,6 +365,15 @@ function stopPlayer() {
   currentSongId = null;
   playerStage.classList.add('hidden');
   catalogEl.classList.remove('hidden');
+
+  // Tell the server this turn's playback is over so the singer's phone
+  // stops capturing mic audio and gets a final score, instead of
+  // streaming indefinitely (see the 'endTurn' handler on /ws/room).
+  if (nowPlayingUserId && roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'endTurn', userId: nowPlayingUserId }));
+  }
+  nowPlayingUserId = null;
+  lastAutoPlayedSongId = null;
 }
 
 backBtn.addEventListener('click', stopPlayer);
@@ -306,11 +479,13 @@ function renderNetworkStatus(users) {
 }
 
 let lastAutoPlayedSongId = null;
+let nowPlayingUserId = null;
 
 function handleNowPlaying(nowPlaying) {
   if (!nowPlaying || !nowPlaying.songId) return;
   if (nowPlaying.songId === lastAutoPlayedSongId) return;
   lastAutoPlayedSongId = nowPlaying.songId;
+  nowPlayingUserId = nowPlaying.userId ?? null;
   openSong(nowPlaying.songId);
 }
 

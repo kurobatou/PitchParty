@@ -19,6 +19,7 @@ const startMicBtn = document.getElementById('start-mic-btn');
 const stopMicBtn = document.getElementById('stop-mic-btn');
 const scoreEl = document.getElementById('score');
 const maxScoreEl = document.getElementById('max-score');
+const singAgainBtn = document.getElementById('sing-again-btn');
 
 let role = null;
 let userId = null;
@@ -31,6 +32,12 @@ let sourceNode = null;
 let silentGain = null;
 let mediaStream = null;
 let singWs = null;
+
+// 'unknown' | 'granted' | 'denied' — primed while the singer waits in the
+// queue (see primeMicPermission) so the OS permission prompt happens then,
+// not at the exact moment they're called to sing.
+let micPermissionState = 'unknown';
+let startingMic = false;
 
 // A separate, short-lived context just for the "it's your turn" alert.
 // iOS only allows starting audio from a user gesture, and the alert has
@@ -126,17 +133,51 @@ function startLatencyPing() {
   }, 5000);
 }
 
+async function loadSongOptions() {
+  const res = await fetch('/api/songs');
+  const songs = await res.json();
+  songSelect.innerHTML = songs
+    .map((s) => `<option value="${s.id}">${escapeHtml(s.artist)} — ${escapeHtml(s.title)}</option>`)
+    .join('');
+}
+
 async function onJoined() {
   stepJoin.classList.add('hidden');
   if (role === 'singer') {
     stepSong.classList.remove('hidden');
-    const res = await fetch('/api/songs');
-    const songs = await res.json();
-    songSelect.innerHTML = songs
-      .map((s) => `<option value="${s.id}">${escapeHtml(s.artist)} — ${escapeHtml(s.title)}</option>`)
-      .join('');
+    await loadSongOptions();
   } else {
     stepGuest.classList.remove('hidden');
+  }
+}
+
+// After being scored, go back to picking a song instead of leaving the
+// singer stuck on the "Terminaste" screen with no way to queue again.
+singAgainBtn.addEventListener('click', async () => {
+  singAgainBtn.classList.add('hidden');
+  scoreEl.textContent = '0';
+  maxScoreEl.textContent = '0';
+  stepSing.classList.add('hidden');
+  stepSong.classList.remove('hidden');
+  await loadSongOptions();
+});
+
+// Asking for mic access here — right after picking a song, while there's
+// still a natural reason for it — means the OS permission prompt (and any
+// confusion around it) happens during the queue wait, not at the moment
+// they're called to sing. Once granted, the browser remembers it for this
+// site, so the real startMic() later needs no prompt at all.
+async function primeMicPermission() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => t.stop());
+    micPermissionState = 'granted';
+    if (!stepSing.classList.contains('hidden') && previousSelfState !== 'called') {
+      singStatus.textContent = 'Estás en la cola. El micrófono ya está listo — cuando te llamen, arranca solo.';
+    }
+  } catch (err) {
+    micPermissionState = 'denied';
+    console.warn('mic permission priming failed', err);
   }
 }
 
@@ -145,9 +186,10 @@ chooseSongBtn.addEventListener('click', () => {
   roomWs.send(JSON.stringify({ type: 'chooseSong', songId: Number(selectedSongId) }));
   stepSong.classList.add('hidden');
   stepSing.classList.remove('hidden');
-  singStatus.textContent = 'Estás en la cola. Esperá a que la pantalla principal te llame.';
+  singStatus.textContent = 'Estás en la cola. Preparando el micrófono...';
 
   unlockAlertAudio();
+  primeMicPermission();
 });
 
 let hasStartedThisTurn = false;
@@ -164,9 +206,20 @@ function onRoomState(data) {
   }
   previousSelfState = self.state;
 
-  if (self.state === 'called' && !hasStartedThisTurn) {
-    startMicBtn.disabled = false;
-    singStatus.textContent = '¡Es tu turno! Apretá "Empezar a cantar".';
+  if (self.state === 'called' && !hasStartedThisTurn && !startingMic) {
+    if (micPermissionState === 'denied') {
+      // Priming failed (permission blocked) — fall back to the manual
+      // tap, which lets the browser retry the prompt from a fresh gesture.
+      startMicBtn.disabled = false;
+      singStatus.textContent = '¡Es tu turno! Apretá "Empezar a cantar" para dar permiso de micrófono.';
+    } else {
+      singStatus.textContent = '¡Es tu turno! Arrancando el micrófono...';
+      startMic().catch((err) => {
+        console.error(err);
+        startMicBtn.disabled = false;
+        singStatus.textContent = `No se pudo activar el micrófono automáticamente: ${err.message}. Apretá "Empezar a cantar".`;
+      });
+    }
   } else if (self.state === 'queued') {
     const position = data.queue.indexOf(self.nickname) + 1;
     startMicBtn.disabled = true;
@@ -175,12 +228,21 @@ function onRoomState(data) {
       : 'Esperando tu turno...';
   } else if (self.state === 'scored') {
     hasStartedThisTurn = false;
+    singAgainBtn.classList.remove('hidden');
   }
 }
 
 async function startMic() {
+  startingMic = true;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } finally {
+    startingMic = false;
+  }
+
   hasStartedThisTurn = true;
-  mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  mediaStream = stream;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   sourceNode = audioCtx.createMediaStreamSource(mediaStream);
   processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
@@ -204,9 +266,14 @@ async function startMic() {
       maxScoreEl.textContent = data.maxScore;
       singStatus.textContent = data.hit ? '✓ afinado' : 'Cantando...';
     } else if (data.type === 'summary') {
+      // Sent either because we asked to stop, or because the Sala's
+      // screen finished playing this turn's song — either way the mic
+      // must stop capturing now, not keep streaming forever.
       scoreEl.textContent = data.totalScore;
       maxScoreEl.textContent = data.maxScore;
       singStatus.textContent = 'Terminaste. ¡Buen trabajo!';
+      finishSingingTurn();
+      singAgainBtn.classList.remove('hidden');
     }
   };
 
@@ -218,18 +285,41 @@ async function startMic() {
   stopMicBtn.disabled = false;
 }
 
-function stopMic() {
-  if (singWs && singWs.readyState === WebSocket.OPEN) singWs.close();
-  singWs = null;
-
+// Releases the mic/AudioContext so the phone is actually idle between
+// turns, and leaves it ready for the next "called" state to auto-start
+// again (see onRoomState).
+function teardownMicPipeline() {
   processorNode?.disconnect();
   sourceNode?.disconnect();
   silentGain?.disconnect();
   mediaStream?.getTracks().forEach((t) => t.stop());
   audioCtx?.close();
+  processorNode = null;
+  sourceNode = null;
+  silentGain = null;
+  mediaStream = null;
+  audioCtx = null;
 
-  startMicBtn.disabled = false;
+  startMicBtn.disabled = true;
   stopMicBtn.disabled = true;
+}
+
+function finishSingingTurn() {
+  teardownMicPipeline();
+  if (singWs && singWs.readyState === WebSocket.OPEN) singWs.close();
+  singWs = null;
+  hasStartedThisTurn = false;
+}
+
+// Manual "Detener" — ask the server to score up to now and reply with a
+// summary (same path the Sala's automatic end-of-song takes), instead of
+// just closing the socket and leaving the turn "abandoned" with no score.
+function stopMic() {
+  if (singWs && singWs.readyState === WebSocket.OPEN) {
+    singWs.send(JSON.stringify({ type: 'stop' }));
+  } else {
+    finishSingingTurn();
+  }
 }
 
 startMicBtn.addEventListener('click', () => startMic().catch((err) => {

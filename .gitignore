@@ -1,10 +1,7 @@
 node_modules/
 *.log
 .DS_Store
-server/*.db
-server/*.db-journal
-server/*.db-wal
-server/*.db-shm
+server/data/
 /songs/
 .env
 .claude/settings.local.json

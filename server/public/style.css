@@ -57,6 +57,35 @@ html, body {
   gap: 20px;
 }
 
+.letter-index {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.letter-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid #262740;
+  background: #171826;
+  color: #9c9db3;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.letter-btn:hover {
+  border-color: #6c5ce7;
+  color: #f2f2f6;
+}
+
+.letter-btn.active {
+  background: #6c5ce7;
+  border-color: #6c5ce7;
+  color: #fff;
+}
+
 .room-panel {
   flex: 0 0 260px;
   display: flex;
@@ -205,6 +234,29 @@ html, body {
   padding: 10px 20px;
   text-align: center;
   font-size: 14px;
+}
+
+.viz-debug {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  z-index: 20;
+  background: rgba(0,0,0,0.6);
+  color: #9c9db3;
+  font-size: 11px;
+  font-family: monospace;
+  padding: 4px 8px;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.audio-unlock-banner {
+  background: #241f3d;
+  color: #cfcaff;
+  padding: 10px 20px;
+  text-align: center;
+  font-size: 14px;
+  cursor: pointer;
 }
 
 .song-card {
@@ -371,4 +423,130 @@ html, body {
   font-size: 40px;
   font-weight: 700;
   color: #ffd23f;
+}
+
+/* Settings */
+
+.settings-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 24px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-card {
+  background: #171826;
+  border: 1px solid #262740;
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.settings-card h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.settings-hint {
+  color: #9c9db3;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-hint code {
+  background: #0b0c14;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.settings-label {
+  color: #9c9db3;
+  font-size: 14px;
+  min-width: 110px;
+}
+
+.settings-row input[type="text"] {
+  flex: 1;
+  min-width: 220px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #33344a;
+  background: #0b0c14;
+  color: #f2f2f6;
+  font-size: 14px;
+}
+
+.settings-row button {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #33344a;
+  background: #262740;
+  color: #f2f2f6;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.settings-row button:hover {
+  border-color: #6c5ce7;
+}
+
+.settings-row button.primary-btn {
+  background: #6c5ce7;
+  border-color: #6c5ce7;
+  color: #fff;
+}
+
+.settings-row button.primary-btn:hover {
+  background: #5b4bd1;
+}
+
+.settings-status {
+  color: #9c9db3;
+  font-size: 13px;
+}
+
+.library-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.library-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #262740;
+  font-size: 14px;
+}
+
+.library-list li:last-child {
+  border-bottom: none;
+}
+
+.path-text {
+  flex: 1;
+  word-break: break-all;
+}
+
+.path-ok { color: #2ecc71; font-size: 12px; }
+.path-missing { color: #ff6b6b; font-size: 12px; }
+
+.remove-path-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #33344a;
+  background: #0b0c14;
+  color: #ff9f9f;
+  font-size: 12px;
+  cursor: pointer;
 }
