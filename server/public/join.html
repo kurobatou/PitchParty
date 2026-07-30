@@ -35,7 +35,10 @@
       background: #241f3d;
     }
     .hidden { display: none !important; }
-    .status-line { margin-top: 20px; color: #9c9db3; }
+    .status-line { margin-top: 20px; color: #e4e4ec; font-size: 17px; font-weight: 600; }
+    .song-info { margin-top: 4px; color: #9c9db3; font-size: 14px; }
+    .advance-row { margin-top: 16px; }
+    .advance-row button { background: #241f3d; border-color: #6c5ce7; }
     .score-box {
       margin-top: 20px;
       background: #171826;
@@ -45,6 +48,36 @@
       text-align: center;
     }
     .score-box .big { font-size: 40px; font-weight: 700; color: #ffd23f; }
+    .song-results {
+      list-style: none;
+      margin: 10px 0 0;
+      padding: 0;
+      max-height: 45vh;
+      overflow-y: auto;
+      border: 1px solid #262740;
+      border-radius: 8px;
+    }
+    .song-results li {
+      padding: 12px 14px;
+      border-bottom: 1px solid #262740;
+      cursor: pointer;
+    }
+    .song-results li:last-child { border-bottom: none; }
+    .song-results li:active, .song-results li.selected {
+      background: #241f3d;
+    }
+    .song-results .song-artist { font-size: 13px; color: #9c9db3; }
+    .song-results .no-results { color: #9c9db3; cursor: default; }
+    .lyrics-preview {
+      margin-top: 16px;
+      background: #171826;
+      border: 1px solid #262740;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    .lyrics-preview .current { color: #ffd23f; font-size: 24px; font-weight: 700; min-height: 30px; }
+    .lyrics-preview .next { color: #9c9db3; font-size: 16px; min-height: 20px; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -53,7 +86,11 @@
     Pedile a quien organiza la sala la dirección con <strong>https://</strong>.
   </div>
   <div class="join-wrap">
-    <h1>🎤 Unirse a la sala</h1>
+    <h1 id="page-title">🎤 Unirse a la sala</h1>
+
+    <div id="advance-row" class="advance-row hidden">
+      <button id="advance-queue-btn" type="button">▶ Empezar / avanzar cola</button>
+    </div>
 
     <div id="step-join">
       <input id="nickname" type="text" placeholder="Tu nombre" maxlength="24" />
@@ -66,14 +103,20 @@
 
     <div id="step-song" class="hidden">
       <p class="status-line">Elegí una canción para cantar:</p>
-      <select id="song-select"></select>
-      <button id="choose-song-btn">Confirmar canción</button>
+      <input id="song-search" type="text" placeholder="Buscar por título o artista..." autocomplete="off" />
+      <ul id="song-results" class="song-results"></ul>
     </div>
 
     <div id="step-sing" class="hidden">
       <p class="status-line" id="sing-status">Esperando...</p>
+      <p class="song-info hidden" id="sing-song-info"></p>
       <button id="start-mic-btn" disabled>🎤 Empezar a cantar</button>
       <button id="stop-mic-btn" disabled>■ Detener</button>
+
+      <div class="lyrics-preview hidden" id="lyrics-preview">
+        <div class="current" id="phone-lyrics-current"></div>
+        <div class="next" id="phone-lyrics-next"></div>
+      </div>
 
       <div class="score-box">
         <div>Puntaje</div>

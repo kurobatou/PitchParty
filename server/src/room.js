@@ -8,14 +8,21 @@ export const MAX_ACTIVE_SINGERS = 4;
  * turn queue, and the session ranking, broadcasting state to every open
  * /ws/room socket.
  */
+// A dropped phone (screen lock, background, brief network blip) gets this
+// long to reconnect and reclaim its queue position/state before being
+// removed from the room outright — otherwise every lock screen would
+// silently bump someone out of the queue and lose their song choice.
+export const DISCONNECT_GRACE_MS = 90_000;
+
 export class Room {
   constructor() {
-    this.users = new Map(); // id -> { id, nickname, role, state, songId, songTitle, lastScore, latencyMs, socket }
+    this.users = new Map(); // id -> { id, nickname, role, state, songId, songTitle, lastScore, latencyMs, socket, connected }
     this.queue = []; // userIds waiting their turn, FIFO
     this.activeSingers = new Set(); // userIds currently "called" or "singing"
     this.ranking = []; // [{ nickname, songTitle, total, max, at }]
     this.lowLatencyMode = false;
     this.nowPlaying = null; // { songId, songTitle } — drives Sala auto-playback
+    this.disconnectTimers = new Map(); // id -> Timeout, pending removal after grace period
   }
 
   setLowLatencyMode(enabled) {
@@ -34,6 +41,7 @@ export class Room {
       lastScore: null,
       latencyMs: null,
       socket,
+      connected: true,
     });
     return id;
   }
@@ -45,9 +53,47 @@ export class Room {
   }
 
   remove(id) {
+    this.cancelDisconnect(id);
     this.users.delete(id);
     this.queue = this.queue.filter((qid) => qid !== id);
     this.activeSingers.delete(id);
+  }
+
+  // Socket closed — don't drop the user immediately (see DISCONNECT_GRACE_MS
+  // above); `onExpire` (passed by the caller) does the actual `remove` if
+  // they never reconnect in time.
+  scheduleDisconnect(id, onExpire) {
+    const user = this.users.get(id);
+    if (!user) return;
+    user.connected = false;
+    this.cancelDisconnect(id);
+    const timer = setTimeout(() => {
+      this.disconnectTimers.delete(id);
+      onExpire();
+    }, DISCONNECT_GRACE_MS);
+    this.disconnectTimers.set(id, timer);
+  }
+
+  cancelDisconnect(id) {
+    const timer = this.disconnectTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.disconnectTimers.delete(id);
+    }
+  }
+
+  // Reclaims an existing user record for a fresh socket (page reload,
+  // reconnect after the WS dropped) instead of starting a brand new one —
+  // keeps their nickname, queue position, and current turn state intact.
+  // Returns the user, or null if that id is gone (grace period expired,
+  // or a session from before the server itself restarted).
+  reconnect(id, socket) {
+    const user = this.users.get(id);
+    if (!user) return null;
+    this.cancelDisconnect(id);
+    user.socket = socket;
+    user.connected = true;
+    return user;
   }
 
   // Called when a singer picks a song: puts them in line if they aren't
@@ -121,7 +167,10 @@ export class Room {
     this.broadcast({
       type: 'roomState',
       users: this.toPublicList(),
-      queue: this.queue.map((id) => this.users.get(id)?.nickname ?? '?'),
+      queue: this.queue.map((id) => {
+        const user = this.users.get(id);
+        return { id, nickname: user?.nickname ?? '?', songTitle: user?.songTitle ?? null };
+      }),
       ranking: this.ranking.slice(0, 10),
       lowLatencyMode: this.lowLatencyMode,
       nowPlaying: this.nowPlaying,

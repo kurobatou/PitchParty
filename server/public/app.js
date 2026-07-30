@@ -4,6 +4,7 @@ const playerStage = document.getElementById('player-stage');
 const catalogEl = document.getElementById('catalog');
 const searchEl = document.getElementById('search');
 const backBtn = document.getElementById('back-btn');
+const fullscreenBtn = document.getElementById('fullscreen-btn');
 
 const audioEl = document.getElementById('audio');
 const bgVideoEl = document.getElementById('bg-video');
@@ -100,28 +101,8 @@ function pickTheme(songId) {
   themeHue = (songId * 47) % 360;
 }
 
-// Temporary on-screen readout (no devtools needed — useful on TVs/set-top
-// boxes) showing whether the audio graph is actually alive and receiving
-// signal. Safe to remove once the visualizer is confirmed working
-// everywhere.
-const vizDebugEl = document.getElementById('viz-debug');
-let debugFrameCount = 0;
-
 function drawWaves() {
   requestAnimationFrame(drawWaves);
-
-  debugFrameCount++;
-  if (vizDebugEl && debugFrameCount % 15 === 0) {
-    if (vizFailed) {
-      vizDebugEl.textContent = 'viz: failed to init (ver consola)';
-    } else if (!vizAudioCtx) {
-      vizDebugEl.textContent = 'viz: sin inicializar (tocá la pantalla)';
-    } else {
-      const avgFreq = freqData ? freqData.reduce((a, b) => a + b, 0) / freqData.length : 0;
-      vizDebugEl.textContent = `viz: ctx=${vizAudioCtx.state} canvas=${bgWavesEl.width}x${bgWavesEl.height} amp=${avgFreq.toFixed(1)}`;
-    }
-  }
-
   if (bgWavesEl.classList.contains('hidden') || !analyser) return;
 
   analyser.getByteFrequencyData(freqData);
@@ -286,6 +267,15 @@ function escapeHtml(str) {
 
 searchEl.addEventListener('input', applyFilters);
 
+function showWavesBackground(song) {
+  bgFallbackEl.classList.remove('hidden');
+  bgWavesEl.classList.remove('hidden');
+  bgWavesEl.width = bgWavesEl.clientWidth;
+  bgWavesEl.height = bgWavesEl.clientHeight;
+  pickTheme(song.id);
+  unlockPlaybackAudio();
+}
+
 async function openSong(id) {
   const res = await fetch(`/api/songs/${id}`);
   if (!res.ok) return;
@@ -321,15 +311,30 @@ async function openSong(id) {
     bgFallbackEl.classList.add('hidden');
     bgWavesEl.classList.add('hidden');
     bgVideoEl.currentTime = 0;
+
+    // hasVideo just means the .txt pointed at a file that exists — it
+    // doesn't mean this browser can actually decode it (old .avi/Xvid
+    // files from an UltraStar library are a common case). If the video
+    // errors out or never gets any playable data, fall back to the wave
+    // visualizer instead of leaving a blank black screen with silent
+    // (audio-only) playback.
+    let fellBack = false;
+    const fallbackToWaves = (reason) => {
+      if (fellBack || currentSongId !== song.id) return;
+      fellBack = true;
+      console.warn(`video playback failed (${reason}), falling back to waves for song ${song.id}`);
+      bgVideoEl.pause();
+      bgVideoEl.removeAttribute('src');
+      showWavesBackground(song);
+    };
+    bgVideoEl.onerror = () => fallbackToWaves('error event');
+    setTimeout(() => {
+      if (bgVideoEl.readyState < 2) fallbackToWaves('no playable data after 3s');
+    }, 3000);
   } else {
     bgVideoEl.classList.add('hidden');
     bgVideoEl.removeAttribute('src');
-    bgFallbackEl.classList.remove('hidden');
-    bgWavesEl.classList.remove('hidden');
-    bgWavesEl.width = bgWavesEl.clientWidth;
-    bgWavesEl.height = bgWavesEl.clientHeight;
-    pickTheme(song.id);
-    unlockPlaybackAudio();
+    showWavesBackground(song);
   }
 
   audioEl.play().catch(() => {});
@@ -377,6 +382,14 @@ function stopPlayer() {
 }
 
 backBtn.addEventListener('click', stopPlayer);
+
+fullscreenBtn.addEventListener('click', () => {
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else {
+    playerStage.requestFullscreen().catch((err) => console.warn('fullscreen unavailable', err));
+  }
+});
 audioEl.addEventListener('ended', stopPlayer);
 
 audioEl.addEventListener('timeupdate', () => {
@@ -437,11 +450,16 @@ function renderUsers(users) {
   }).join('');
 }
 
-function renderQueue(queueNicknames) {
+function renderQueue(queue) {
   const list = document.getElementById('queue-list');
-  list.innerHTML = queueNicknames.length === 0
+  list.innerHTML = queue.length === 0
     ? '<li style="color:#9c9db3">Nadie en cola</li>'
-    : queueNicknames.map((name) => `<li>${escapeHtml(name)}</li>`).join('');
+    : queue.map((q) => `
+      <li>
+        ${escapeHtml(q.nickname)}
+        ${q.songTitle ? `<span style="color:#9c9db3"> — ${escapeHtml(q.songTitle)}</span>` : ''}
+      </li>
+    `).join('');
 }
 
 function renderRanking(ranking) {

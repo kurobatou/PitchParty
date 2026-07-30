@@ -295,6 +295,28 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
       return;
     }
 
+    // A phone that reloaded or reconnected after a dropped WebSocket
+    // (screen lock, brief network blip) reclaims its existing queue
+    // position/state instead of starting over as a stranger — see
+    // Room.reconnect and DISCONNECT_GRACE_MS in room.js.
+    if (msg.type === 'rejoin') {
+      const user = room.reconnect(msg.userId, socket);
+      if (user) {
+        userId = msg.userId;
+        socket.send(JSON.stringify({
+          type: 'welcome',
+          userId,
+          rejoined: true,
+          role: user.role,
+          nickname: user.nickname,
+        }));
+        room.broadcastState();
+      } else {
+        socket.send(JSON.stringify({ type: 'rejoinFailed' }));
+      }
+      return;
+    }
+
     if (!userId) return; // must join before anything else
 
     if (msg.type === 'chooseSong') {
@@ -355,10 +377,24 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
   });
 
   socket.on('close', () => {
-    if (userId) {
+    if (!userId) return;
+    const user = room.users.get(userId);
+    if (!user) return;
+
+    // The pantalla principal doesn't hold a queue position worth saving —
+    // it just reconnects as a fresh "Pantalla" entry on its own (app.js) —
+    // so only give phones (singer/guest) the reconnect grace period.
+    if (user.role === 'screen') {
       room.remove(userId);
       room.broadcastState();
+      return;
     }
+
+    room.scheduleDisconnect(userId, () => {
+      room.remove(userId);
+      room.broadcastState();
+    });
+    room.broadcastState();
   });
 });
 
