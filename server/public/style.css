@@ -288,6 +288,13 @@ html, body {
   object-fit: cover;
 }
 
+.bg-waves {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 .back-btn {
   position: absolute;
   top: 20px;
@@ -327,13 +334,14 @@ html, body {
   background: linear-gradient(rgba(0,0,0,0.65), transparent);
 }
 
-.progress-track {
-  margin: 12px auto 0;
-  max-width: 480px;
+.progress-track-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
   height: 6px;
   background: rgba(255,255,255,0.18);
-  border-radius: 3px;
-  overflow: hidden;
 }
 
 .progress-fill {

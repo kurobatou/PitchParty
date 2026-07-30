@@ -8,6 +8,7 @@ const backBtn = document.getElementById('back-btn');
 const audioEl = document.getElementById('audio');
 const bgVideoEl = document.getElementById('bg-video');
 const bgFallbackEl = document.getElementById('bg-fallback');
+const bgWavesEl = document.getElementById('bg-waves');
 const titleEl = document.getElementById('player-title');
 const artistEl = document.getElementById('player-artist');
 const prevEl = document.getElementById('lyrics-prev');
@@ -27,6 +28,46 @@ function beatToMs(beat, bpm, gap) {
 
 function lineText(line) {
   return line.notes.map((n) => n.text).join('');
+}
+
+// Songs without their own video fall back to bars driven by the actual
+// playback audio (Web Audio AnalyserNode) instead of a flat gradient.
+// createMediaElementSource can only be called once per <audio> element,
+// so this graph is built lazily the first time and reused for every song.
+let vizAudioCtx = null;
+let analyser = null;
+let analyserData = null;
+let wavesCanvasCtx = null;
+
+function ensureAudioGraph() {
+  if (vizAudioCtx) return;
+  vizAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = vizAudioCtx.createMediaElementSource(audioEl);
+  analyser = vizAudioCtx.createAnalyser();
+  analyser.fftSize = 128;
+  analyser.smoothingTimeConstant = 0.75;
+  source.connect(analyser);
+  analyser.connect(vizAudioCtx.destination);
+  analyserData = new Uint8Array(analyser.frequencyBinCount);
+  wavesCanvasCtx = bgWavesEl.getContext('2d');
+  drawWaves();
+}
+
+function drawWaves() {
+  requestAnimationFrame(drawWaves);
+  if (bgWavesEl.classList.contains('hidden')) return;
+
+  analyser.getByteFrequencyData(analyserData);
+  const { width, height } = bgWavesEl;
+  wavesCanvasCtx.clearRect(0, 0, width, height);
+
+  const barCount = analyserData.length;
+  const barWidth = width / barCount;
+  for (let i = 0; i < barCount; i++) {
+    const barHeight = (analyserData[i] / 255) * height * 0.85;
+    wavesCanvasCtx.fillStyle = `hsl(${255 + i * 1.5}, 70%, 60%)`;
+    wavesCanvasCtx.fillRect(i * barWidth, height - barHeight, barWidth - 1, barHeight);
+  }
 }
 
 async function loadCatalog() {
@@ -103,23 +144,29 @@ async function openSong(id) {
       };
     });
 
+  audioEl.src = song.mp3Url;
+  progressFillEl.style.width = '0%';
+  catalogEl.classList.add('hidden');
+  playerStage.classList.remove('hidden');
+
   const useVideo = song.hasVideo && song.videoUrl && !lowLatencyMode;
 
   if (useVideo) {
     bgVideoEl.src = song.videoUrl;
     bgVideoEl.classList.remove('hidden');
     bgFallbackEl.classList.add('hidden');
+    bgWavesEl.classList.add('hidden');
     bgVideoEl.currentTime = 0;
   } else {
     bgVideoEl.classList.add('hidden');
-    bgFallbackEl.classList.remove('hidden');
     bgVideoEl.removeAttribute('src');
+    bgFallbackEl.classList.remove('hidden');
+    bgWavesEl.classList.remove('hidden');
+    bgWavesEl.width = bgWavesEl.clientWidth;
+    bgWavesEl.height = bgWavesEl.clientHeight;
+    ensureAudioGraph();
+    vizAudioCtx.resume();
   }
-
-  audioEl.src = song.mp3Url;
-  progressFillEl.style.width = '0%';
-  catalogEl.classList.add('hidden');
-  playerStage.classList.remove('hidden');
 
   audioEl.play().catch(() => {});
   if (useVideo) bgVideoEl.play().catch(() => {});

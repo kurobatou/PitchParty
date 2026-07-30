@@ -28,6 +28,7 @@
 
       <div id="player-stage" class="player-stage hidden">
         <div id="bg-fallback" class="bg-fallback"></div>
+        <canvas id="bg-waves" class="bg-waves hidden"></canvas>
         <video id="bg-video" class="bg-video hidden" muted playsinline></video>
         <audio id="audio" preload="auto"></audio>
 
@@ -35,9 +36,6 @@
 
         <div class="player-title-bar">
           <span id="player-title"></span> — <span id="player-artist"></span>
-          <div class="progress-track">
-            <div id="progress-fill" class="progress-fill"></div>
-          </div>
         </div>
 
         <div class="player-overlay">
@@ -46,6 +44,10 @@
             <div id="lyrics-current" class="lyrics-line lyrics-current"></div>
             <div id="lyrics-next" class="lyrics-line lyrics-next"></div>
           </div>
+        </div>
+
+        <div class="progress-track-bottom">
+          <div id="progress-fill" class="progress-fill"></div>
         </div>
       </div>
     </div>

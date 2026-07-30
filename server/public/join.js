@@ -38,10 +38,28 @@ let singWs = null;
 // here, on the last button tap before the phone just sits and waits.
 let alertCtx = null;
 
+// iOS requires an actual sound to start *inside* the gesture handler, not
+// just the AudioContext to be constructed there — otherwise it stays
+// "unlocked but silent" and the later programmatic beep never plays.
+function unlockAlertAudio() {
+  if (!alertCtx) alertCtx = new (window.AudioContext || window.webkitAudioContext)();
+  alertCtx.resume();
+
+  const osc = alertCtx.createOscillator();
+  const gain = alertCtx.createGain();
+  gain.gain.value = 0.0001; // effectively silent, just for the unlock
+  osc.connect(gain);
+  gain.connect(alertCtx.destination);
+  osc.start();
+  osc.stop(alertCtx.currentTime + 0.05);
+}
+
 function playCallAlert() {
   if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
 
   if (!alertCtx) return;
+  alertCtx.resume();
+
   const osc = alertCtx.createOscillator();
   const gain = alertCtx.createGain();
   osc.frequency.value = 880;
@@ -129,7 +147,7 @@ chooseSongBtn.addEventListener('click', () => {
   stepSing.classList.remove('hidden');
   singStatus.textContent = 'Estás en la cola. Esperá a que la pantalla principal te llame.';
 
-  if (!alertCtx) alertCtx = new (window.AudioContext || window.webkitAudioContext)();
+  unlockAlertAudio();
 });
 
 let hasStartedThisTurn = false;
