@@ -16,5 +16,8 @@
     "fastify": "^4.28.1",
     "qrcode": "^1.5.4",
     "selfsigned": "^2.4.1"
+  },
+  "allowScripts": {
+    "better-sqlite3@13.0.2": true
   }
 }

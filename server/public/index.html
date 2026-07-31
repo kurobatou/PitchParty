@@ -4,6 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Karaoke — Sala</title>
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem('pitchparty-theme') === 'light') {
+          document.documentElement.dataset.theme = 'light';
+        }
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -16,16 +25,21 @@
   </div>
   <header class="topbar">
     <h1>🎤 Sala de Karaoke</h1>
-    <input id="search" type="search" placeholder="Buscar canción o artista..." />
+    <div class="search-pill">
+      <span class="search-icon">🔍</span>
+      <input id="search" type="search" placeholder="Buscar canción o artista..." />
+    </div>
     <div class="network-status">
       <span id="network-dot" class="network-dot"></span>
       <span id="network-label">Red: sin datos</span>
     </div>
     <button id="low-latency-toggle" class="low-latency-btn">Modo baja latencia: OFF</button>
-    <a href="/settings.html" style="color:#9c9db3">⚙️ Configuración</a>
+    <button id="theme-toggle" class="theme-toggle-btn" title="Cambiar tema" type="button">🌙</button>
+    <a href="/settings.html" style="color:var(--muted)">⚙️ Configuración</a>
   </header>
 
   <div class="room-layout">
+    <div class="sala-card">
     <div id="center-stage" class="center-stage">
       <nav id="letter-index" class="letter-index"></nav>
       <main id="catalog" class="catalog"></main>
@@ -76,6 +90,7 @@
         <ol id="ranking-list"></ol>
       </div>
     </aside>
+    </div>
   </div>
 
   <script src="/app.js" type="module"></script>

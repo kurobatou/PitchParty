@@ -1,4 +1,5 @@
 import { warnIfInsecureContext } from './audioUtils.js';
+import { toggleTheme, themeIcon } from './theme.js';
 
 const playerStage = document.getElementById('player-stage');
 const catalogEl = document.getElementById('catalog');
@@ -549,6 +550,12 @@ document.getElementById('low-latency-toggle').addEventListener('click', () => {
   if (roomWs?.readyState === WebSocket.OPEN) {
     roomWs.send(JSON.stringify({ type: 'toggleLowLatency', enabled: !lowLatencyMode }));
   }
+});
+
+const themeToggleBtn = document.getElementById('theme-toggle');
+themeToggleBtn.textContent = themeIcon(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+themeToggleBtn.addEventListener('click', () => {
+  themeToggleBtn.textContent = themeIcon(toggleTheme());
 });
 
 loadQr();

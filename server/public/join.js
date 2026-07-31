@@ -1,4 +1,5 @@
 import { downsampleTo16k, floatTo16BitPCM, escapeHtml, warnIfInsecureContext } from './audioUtils.js';
+import { toggleTheme, themeIcon } from './theme.js';
 
 warnIfInsecureContext();
 
@@ -21,12 +22,18 @@ const scoreEl = document.getElementById('score');
 const maxScoreEl = document.getElementById('max-score');
 const singAgainBtn = document.getElementById('sing-again-btn');
 const lyricsPreviewEl = document.getElementById('lyrics-preview');
+const phoneLyricsPrevEl = document.getElementById('phone-lyrics-prev');
 const phoneLyricsNextEl = document.getElementById('phone-lyrics-next');
 const phoneLyricsCurrentEl = document.getElementById('phone-lyrics-current');
 const pageTitleEl = document.getElementById('page-title');
 const advanceRowEl = document.getElementById('advance-row');
 const advanceQueueBtn = document.getElementById('advance-queue-btn');
 const singSongInfoEl = document.getElementById('sing-song-info');
+const avatarEl = document.getElementById('avatar');
+const themeToggleBtn = document.getElementById('theme-toggle');
+const equalizerBoxEl = document.getElementById('equalizer-box');
+const eqBars = Array.from(document.querySelectorAll('#equalizer .eq-bar'));
+const pitchPctEl = document.getElementById('pitch-pct');
 
 let role = null;
 let userId = null;
@@ -112,6 +119,17 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+themeToggleBtn.textContent = themeIcon(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+themeToggleBtn.addEventListener('click', () => {
+  themeToggleBtn.textContent = themeIcon(toggleTheme());
+});
+
+function setAvatar(nickname) {
+  const initial = (nickname || '?').trim().charAt(0).toUpperCase() || '?';
+  avatarEl.textContent = initial;
+  avatarEl.classList.remove('hidden');
+}
+
 function wsUrl(path) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   return `${proto}://${location.host}${path}`;
@@ -181,7 +199,9 @@ function handleRoomMessage(evt) {
     if (data.nickname) nicknameEl.value = data.nickname;
     saveSession();
     stepJoin.classList.add('hidden');
-    pageTitleEl.textContent = `🎤 Conectado como ${data.nickname || nicknameEl.value.trim() || 'Invitado'}`;
+    const displayName = data.nickname || nicknameEl.value.trim() || 'Invitado';
+    pageTitleEl.textContent = `Conectado como ${displayName}`;
+    setAvatar(displayName);
     advanceRowEl.classList.remove('hidden');
     if (!data.rejoined) onJoined();
     // If rejoined, the step (stepSong vs. stepSing vs. stepGuest) is
@@ -461,11 +481,53 @@ async function loadLyricsFor(songId) {
 // nudges the typical ~0.3-0.5s late feeling back in line.
 const LYRICS_LEAD_MS = 400;
 
+// Live "afinación" equalizer — purely client-side, derived from the same
+// per-frame hit/expectedMidi the score already uses. No backend change:
+// a rolling window of recent hits is enough for a convincing live bar
+// animation without needing a smoothed value from the server.
+const EQ_HISTORY_SIZE = 24; // ~24 frames * ~128ms ≈ 3s of singing history
+let hitHistory = [];
+
+function setBarsIdle() {
+  eqBars.forEach((bar) => { bar.style.height = '20%'; });
+}
+
+function resetEqualizer() {
+  hitHistory = [];
+  setBarsIdle();
+  pitchPctEl.textContent = '0%';
+}
+
+function updateEqualizer(hit, expectedMidi) {
+  if (expectedMidi == null) {
+    // Nothing to sing right now (instrumental/rest) — rest the bars low
+    // instead of letting silence drag the rolling percentage toward 0.
+    setBarsIdle();
+    return;
+  }
+
+  hitHistory.push(hit ? 1 : 0);
+  if (hitHistory.length > EQ_HISTORY_SIZE) hitHistory.shift();
+
+  const pct = Math.round((hitHistory.reduce((a, b) => a + b, 0) / hitHistory.length) * 100);
+  pitchPctEl.textContent = `${pct}%`;
+
+  const barsCount = eqBars.length;
+  const chunkSize = Math.max(1, Math.ceil(hitHistory.length / barsCount));
+  for (let i = 0; i < barsCount; i++) {
+    const chunk = hitHistory.slice(i * chunkSize, (i + 1) * chunkSize);
+    const ratio = chunk.length ? chunk.reduce((a, b) => a + b, 0) / chunk.length : 0;
+    eqBars[i].style.height = `${20 + ratio * 70}%`;
+  }
+}
+
 function updateLyricsPreview(elapsedMs) {
   if (activeLines.length === 0) return;
   elapsedMs += LYRICS_LEAD_MS;
   let idx = activeLines.findIndex((l) => elapsedMs < l.endMs);
   if (idx === -1) idx = activeLines.length - 1;
+
+  phoneLyricsPrevEl.textContent = idx > 0 ? activeLines[idx - 1].text : '';
 
   if (elapsedMs < activeLines[idx].startMs) {
     // Between lines: nothing active yet, so what's "current" is really
@@ -507,6 +569,9 @@ async function startMic() {
     if (activeLines.length > 0) lyricsPreviewEl.classList.remove('hidden');
   });
 
+  resetEqualizer();
+  equalizerBoxEl.classList.remove('hidden');
+
   singWs = new WebSocket(wsUrl(`/ws/sing/${selectedSongId}?userId=${userId}`));
 
   processorNode.onaudioprocess = (event) => {
@@ -524,6 +589,7 @@ async function startMic() {
       maxScoreEl.textContent = data.maxScore;
       singStatus.textContent = data.hit ? '✓ afinado' : 'Cantando...';
       updateLyricsPreview(data.elapsedMs);
+      updateEqualizer(data.hit, data.expectedMidi);
     } else if (data.type === 'summary') {
       // Sent either because we asked to stop, or because the Sala's
       // screen finished playing this turn's song — either way the mic
@@ -562,9 +628,12 @@ function teardownMicPipeline() {
   startMicBtn.disabled = true;
   stopMicBtn.disabled = true;
   lyricsPreviewEl.classList.add('hidden');
+  phoneLyricsPrevEl.textContent = '';
   phoneLyricsNextEl.textContent = '';
   phoneLyricsCurrentEl.textContent = '';
   singSongInfoEl.classList.add('hidden');
+  equalizerBoxEl.classList.add('hidden');
+  resetEqualizer();
 }
 
 function finishSingingTurn() {
