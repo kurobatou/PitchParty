@@ -1,5 +1,7 @@
 # PitchParty 🎤
 
+![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
+
 Sistema de karaoke casero (estilo UltraStar Deluxe) para la red local de tu casa: el celular es el micrófono, la TV/PC es la pantalla principal. Corre como un único proceso Node.js — sin Docker, sin Python, sin nada más que instalar además de Node.
 
 Reutiliza el catálogo y formato de canciones de **UltraStar Deluxe** (`.txt` + audio + video), con un motor de puntuación propio en JavaScript.
@@ -88,6 +90,10 @@ Fases 0 a 4 del plan completas: indexador + parser USDX, motor de puntuación co
 Migrado de Docker/Python a un único proceso Node.js, con configuración desde la UI (carpetas de biblioteca vía selector nativo o ruta a mano, IP del servidor, certificado HTTPS). El flujo de "cantante" en el celular quedó de punta a punta: búsqueda con autocompletado, permiso de mic pedido con anticipación, arranque automático al ser llamado, letra en pantalla mientras canta, corte automático y puntaje al terminar (por la Sala o por el propio celular), reconexión con recuperación de la cola si se corta la conexión, y vuelta a elegir canción sin recargar la página. La Sala soporta bibliotecas grandes (selector alfabético), pantalla completa, y varía el efecto visual de fondo por canción cuando no hay video (con fallback automático si el video no es reproducible en el navegador).
 
 El estado previo a esta migración (versión con Docker + motor de puntuación en Python) quedó preservado en la rama `alpha`.
+
+## Licencia
+
+Código bajo licencia [Apache 2.0](LICENSE). Esto cubre el código de este repositorio — no las canciones: la carpeta `songs/` es tuya, no se versiona, y el formato compatible con UltraStar Deluxe no implica que el repo incluya (ni deba incluir) audio/video con derechos de autor de terceros.
 
 Rediseño visual (a partir de un mockup hecho en Claude Design): sistema de tema claro/oscuro con paleta OKLCH y acento configurable vía CSS (`server/public/theme.js` + variables en `style.css`), la Sala pasó a una tarjeta centrada, y el celular ganó un ecualizador de afinación en vivo (12 barras + %, derivado 100% en el cliente del mismo puntaje por frame que ya se mostraba, sin cambios de backend) y una línea de letra "previa" además de actual/siguiente.
 
