@@ -692,6 +692,116 @@ html, body {
   color: var(--text);
 }
 
+/* Sala: countdown antes de arrancar la canción */
+
+.countdown-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.countdown-number {
+  color: #fff;
+  font-weight: 800;
+  font-size: clamp(80px, 22vw, 220px);
+  line-height: 1;
+  text-shadow: 0 6px 40px rgba(var(--accent-rgb), 0.8), 0 2px 12px rgba(0, 0, 0, 0.8);
+}
+
+.countdown-number.go {
+  color: var(--accent);
+  font-size: clamp(48px, 12vw, 130px);
+}
+
+.countdown-number.pop {
+  animation: countdown-pop 850ms ease-out;
+}
+
+@keyframes countdown-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  25% { transform: scale(1.15); opacity: 1; }
+  70% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.15; }
+}
+
+/* Sala: pantalla de resultados al terminar el turno */
+
+.results-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(3px);
+}
+
+.results-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  padding: 40px 48px;
+  text-align: center;
+  max-width: 520px;
+}
+
+.results-emoji { font-size: 56px; line-height: 1; }
+.results-card h2 { margin: 12px 0 4px; font-size: 28px; color: var(--text); }
+.results-score { font-size: 40px; font-weight: 800; color: var(--accent2); margin: 12px 0; }
+.results-next { color: var(--muted); font-size: 17px; margin-bottom: 24px; }
+.results-next strong { color: var(--accent); }
+
+.results-card button {
+  padding: 12px 24px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 15px;
+}
+
+/* Celular: countdown + fin de turno */
+
+.phone-countdown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 160px;
+  margin-bottom: 8px;
+}
+
+.phone-countdown span {
+  font-weight: 800;
+  font-size: 96px;
+  line-height: 1;
+  color: var(--accent);
+  text-shadow: 0 4px 24px rgba(var(--accent-rgb), 0.5);
+}
+
+.phone-countdown span.go { font-size: 52px; }
+.phone-countdown span.pop { animation: countdown-pop 850ms ease-out; }
+
+.score-box .pct-line { margin-top: 6px; font-size: 15px; color: var(--muted); }
+
+.next-up {
+  margin-top: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.next-up strong { color: var(--accent); }
+
 /* Settings */
 
 .settings-page {

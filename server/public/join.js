@@ -34,6 +34,10 @@ const themeToggleBtn = document.getElementById('theme-toggle');
 const equalizerBoxEl = document.getElementById('equalizer-box');
 const eqBars = Array.from(document.querySelectorAll('#equalizer .eq-bar'));
 const pitchPctEl = document.getElementById('pitch-pct');
+const phoneCountdownEl = document.getElementById('phone-countdown');
+const phoneCountdownNumberEl = document.getElementById('phone-countdown-number');
+const phoneNextUpEl = document.getElementById('phone-next-up');
+const scorePctEl = document.getElementById('score-pct');
 
 let role = null;
 let userId = null;
@@ -49,6 +53,45 @@ let silentGain = null;
 let mediaStream = null;
 let singWs = null;
 let activeLines = [];
+
+// Latest queue from roomState, so the end-of-turn screen can show who's up
+// next.
+let latestQueue = [];
+
+// The 3-2-1-¡A cantar! countdown runs here and on the Sala with the same
+// length, both kicked off by the same roomState, so the mic clock this
+// phone starts stays aligned with the Sala's audio playback. See its twin
+// (COUNTDOWN_STEP_MS / runCountdown) in app.js.
+const COUNTDOWN_STEP_MS = 850;
+let turnCountdownRunning = false;
+
+function runCountdown() {
+  return new Promise((resolve) => {
+    const steps = [
+      { text: '3', go: false },
+      { text: '2', go: false },
+      { text: '1', go: false },
+      { text: '¡A cantar!', go: true },
+    ];
+    phoneCountdownEl.classList.remove('hidden');
+    let i = 0;
+    const tick = () => {
+      if (i >= steps.length) {
+        phoneCountdownEl.classList.add('hidden');
+        resolve();
+        return;
+      }
+      const step = steps[i++];
+      phoneCountdownNumberEl.textContent = step.text;
+      phoneCountdownNumberEl.classList.toggle('go', step.go);
+      phoneCountdownNumberEl.classList.remove('pop');
+      void phoneCountdownNumberEl.offsetWidth; // restart the pop animation
+      phoneCountdownNumberEl.classList.add('pop');
+      setTimeout(tick, COUNTDOWN_STEP_MS);
+    };
+    tick();
+  });
+}
 
 // 'unknown' | 'granted' | 'denied' — primed while the singer waits in the
 // queue (see primeMicPermission) so the OS permission prompt happens then,
@@ -212,7 +255,7 @@ function handleRoomMessage(evt) {
     // Grace period expired, or the server restarted since — nothing to
     // reclaim, so start over with a normal join.
     clearSession();
-    pageTitleEl.textContent = '🎤 Unirse a la sala';
+    pageTitleEl.textContent = '🎤 PitchParty';
     advanceRowEl.classList.add('hidden');
     stepJoin.classList.remove('hidden');
     stepSong.classList.add('hidden');
@@ -324,6 +367,8 @@ singAgainBtn.addEventListener('click', async () => {
   singAgainBtn.classList.add('hidden');
   scoreEl.textContent = '0';
   maxScoreEl.textContent = '0';
+  scorePctEl.classList.add('hidden');
+  phoneNextUpEl.classList.add('hidden');
   stepSing.classList.add('hidden');
   stepSong.classList.remove('hidden');
   songSearchEl.value = '';
@@ -410,6 +455,17 @@ function onRoomState(data) {
   const self = data.users.find((u) => u.id === userId);
   if (!self) return;
 
+  latestQueue = data.queue;
+
+  // While someone is taking their turn, only that active singer keeps the
+  // "avanzar cola" button — everyone else has it blocked so a bystander
+  // can't skip the current singer mid-song. Between turns it's open again
+  // so anyone can call the next one up.
+  const someoneActive = data.users.some((u) => u.state === 'called' || u.state === 'singing');
+  const selfActive = self.state === 'called' || self.state === 'singing';
+  advanceQueueBtn.disabled = someoneActive && !selfActive;
+  advanceQueueBtn.title = advanceQueueBtn.disabled ? 'Hay un turno en curso' : '';
+
   if (self.state !== lastRoutedState) {
     routeToStep(self);
     lastRoutedState = self.state;
@@ -420,18 +476,27 @@ function onRoomState(data) {
   }
   previousSelfState = self.state;
 
-  if (self.state === 'called' && !hasStartedThisTurn && !startingMic) {
+  if (self.state === 'called' && !hasStartedThisTurn && !startingMic && !turnCountdownRunning) {
     if (micPermissionState === 'denied') {
       // Priming failed (permission blocked) — fall back to the manual
       // tap, which lets the browser retry the prompt from a fresh gesture.
       startMicBtn.disabled = false;
       singStatus.textContent = '¡Es tu turno! Apretá "Empezar a cantar" para dar permiso de micrófono.';
     } else {
-      singStatus.textContent = '¡Es tu turno! Arrancando el micrófono...';
-      startMic().catch((err) => {
-        console.error(err);
-        startMicBtn.disabled = false;
-        singStatus.textContent = `No se pudo activar el micrófono automáticamente: ${err.message}. Apretá "Empezar a cantar".`;
+      // Run the countdown, then start the mic — matching the Sala's own
+      // countdown so the song and the mic clock start together.
+      turnCountdownRunning = true;
+      singStatus.textContent = '¡Es tu turno! Preparate...';
+      runCountdown().then(() => {
+        turnCountdownRunning = false;
+        // The turn may have been cancelled/finished during the countdown.
+        if (previousSelfState !== 'called' || hasStartedThisTurn || startingMic) return;
+        singStatus.textContent = 'Arrancando el micrófono...';
+        startMic().catch((err) => {
+          console.error(err);
+          startMicBtn.disabled = false;
+          singStatus.textContent = `No se pudo activar el micrófono automáticamente: ${err.message}. Apretá "Empezar a cantar".`;
+        });
       });
     }
   } else if (self.state === 'queued') {
@@ -541,6 +606,15 @@ function updateLyricsPreview(elapsedMs) {
   }
 }
 
+// After a turn ends, show who's up next (head of the queue that isn't us).
+function showNextUp() {
+  const next = latestQueue.find((q) => q.id !== userId);
+  phoneNextUpEl.innerHTML = next
+    ? `Sigue: <strong>${escapeHtml(next.nickname)}</strong>`
+    : 'No hay nadie más en la cola. ¡Elegí otra canción!';
+  phoneNextUpEl.classList.remove('hidden');
+}
+
 async function startMic() {
   startingMic = true;
   let stream;
@@ -552,6 +626,11 @@ async function startMic() {
 
   hasStartedThisTurn = true;
   mediaStream = stream;
+
+  // Clear any leftover end-of-turn UI from a previous song.
+  phoneNextUpEl.classList.add('hidden');
+  scorePctEl.classList.add('hidden');
+  singAgainBtn.classList.add('hidden');
 
   if (selectedSongTitle) {
     singSongInfoEl.textContent = selectedSongTitle;
@@ -596,7 +675,11 @@ async function startMic() {
       // must stop capturing now, not keep streaming forever.
       scoreEl.textContent = data.totalScore;
       maxScoreEl.textContent = data.maxScore;
-      singStatus.textContent = 'Terminaste. ¡Buen trabajo!';
+      const pct = data.maxScore ? Math.round((data.totalScore / data.maxScore) * 100) : 0;
+      scorePctEl.textContent = `${pct}% de afinación`;
+      scorePctEl.classList.remove('hidden');
+      singStatus.textContent = '🎉 ¡Gracias por participar!';
+      showNextUp();
       finishSingingTurn();
       singAgainBtn.classList.remove('hidden');
     }
@@ -634,6 +717,8 @@ function teardownMicPipeline() {
   singSongInfoEl.classList.add('hidden');
   equalizerBoxEl.classList.add('hidden');
   resetEqualizer();
+  phoneCountdownEl.classList.add('hidden');
+  turnCountdownRunning = false;
 }
 
 function finishSingingTurn() {

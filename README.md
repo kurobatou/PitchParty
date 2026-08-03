@@ -29,7 +29,7 @@ Pantalla principal  ──WebSocket (estado, letras)──► Servidor Node (Fas
                                                      └─────────────────────────
 ```
 
-Ver [plan_karaoke_v0.03.md](plan_karaoke_v0.03.md) para el diseño completo y las decisiones de producto.
+Ver [docs/sdd/](docs/sdd/00-index.md) para la especificación técnica completa (arquitectura, protocolo WebSocket/HTTP, modelo de datos, estado de cada fase) — pensada para orientar rápido a quien nunca vio este repo, humano o agente de IA. [plan_karaoke_v0.03.md](plan_karaoke_v0.03.md) es el plan de producto original, previo a la implementación; se conserva como referencia histórica, pero describe una arquitectura con un motor de puntuación en Python que ya no existe.
 
 ## Cómo correrlo
 
@@ -98,3 +98,5 @@ Código bajo licencia [Apache 2.0](LICENSE). Esto cubre el código de este repos
 Rediseño visual (a partir de un mockup hecho en Claude Design): sistema de tema claro/oscuro con paleta OKLCH y acento configurable vía CSS (`server/public/theme.js` + variables en `style.css`), la Sala pasó a una tarjeta centrada, y el celular ganó un ecualizador de afinación en vivo (12 barras + %, derivado 100% en el cliente del mismo puntaje por frame que ya se mostraba, sin cambios de backend) y una línea de letra "previa" además de actual/siguiente.
 
 Acceso remoto fuera de la LAN para invitados externos (Tailscale/Cloudflare Tunnel) queda pendiente como fase opcional — hoy el acceso público solo se usa para la validación DNS del certificado, no para exponer la app.
+
+Detalle fase por fase, y qué queda pendiente, en [docs/sdd/05-status-roadmap.md](docs/sdd/05-status-roadmap.md).

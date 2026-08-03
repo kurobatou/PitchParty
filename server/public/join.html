@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Karaoke — Unirse a la sala</title>
+  <title>PitchParty — Unirse a la sala</title>
   <script>
     (function () {
       try {
@@ -23,7 +23,7 @@
   <div class="join-wrap">
     <div class="join-header">
       <div class="avatar hidden" id="avatar"></div>
-      <h1 id="page-title">🎤 Unirse a la sala</h1>
+      <h1 id="page-title">🎤 PitchParty</h1>
       <button id="theme-toggle" class="theme-toggle-btn" title="Cambiar tema" type="button">🌙</button>
     </div>
 
@@ -47,6 +47,10 @@
     </div>
 
     <div id="step-sing" class="hidden">
+      <div id="phone-countdown" class="phone-countdown hidden">
+        <span id="phone-countdown-number"></span>
+      </div>
+
       <p class="status-line" id="sing-status">Esperando...</p>
       <p class="song-info hidden" id="sing-song-info"></p>
       <button id="start-mic-btn" disabled>🎤 Empezar a cantar</button>
@@ -74,7 +78,10 @@
       <div class="score-box">
         <div>Puntaje</div>
         <div class="big"><span id="score">0</span> / <span id="max-score">0</span></div>
+        <div class="pct-line hidden" id="score-pct"></div>
       </div>
+
+      <p class="next-up hidden" id="phone-next-up"></p>
 
       <button id="sing-again-btn" class="hidden">🎤 Elegir otra canción</button>
     </div>

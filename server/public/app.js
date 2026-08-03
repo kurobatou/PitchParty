@@ -18,10 +18,24 @@ const currentEl = document.getElementById('lyrics-current');
 const nextEl = document.getElementById('lyrics-next');
 const progressFillEl = document.getElementById('progress-fill');
 
+const countdownOverlay = document.getElementById('countdown-overlay');
+const countdownNumber = document.getElementById('countdown-number');
+const resultsOverlay = document.getElementById('results-overlay');
+const resultsTitle = document.getElementById('results-title');
+const resultsScore = document.getElementById('results-score');
+const resultsNext = document.getElementById('results-next');
+const resultsContinue = document.getElementById('results-continue');
+
 let allSongs = [];
 let activeLines = [];
 let rafHandle = null;
 let currentSongId = null;
+
+// Latest roomState snapshot, so the results/countdown screens can look up
+// the current singer's score and who's next in the queue.
+let latestUsers = [];
+let latestQueue = [];
+let currentTurnNickname = null;
 
 function beatToMs(beat, bpm, gap) {
   const msPerBeat = 60000 / (bpm * 4);
@@ -277,7 +291,42 @@ function showWavesBackground(song) {
   unlockPlaybackAudio();
 }
 
-async function openSong(id) {
+// The 3-2-1-¡A cantar! countdown. Both the Sala (here) and the phone
+// (join.js) run an identical-length countdown, started from the same
+// roomState broadcast, so the phone's mic clock stays aligned with the
+// Sala's audio playback — see COUNTDOWN_STEP_MS below and its twin in
+// join.js.
+const COUNTDOWN_STEP_MS = 850;
+
+function runCountdown() {
+  return new Promise((resolve) => {
+    const steps = [
+      { text: '3', go: false },
+      { text: '2', go: false },
+      { text: '1', go: false },
+      { text: '¡A cantar!', go: true },
+    ];
+    countdownOverlay.classList.remove('hidden');
+    let i = 0;
+    const tick = () => {
+      if (i >= steps.length) {
+        countdownOverlay.classList.add('hidden');
+        resolve();
+        return;
+      }
+      const step = steps[i++];
+      countdownNumber.textContent = step.text;
+      countdownNumber.classList.toggle('go', step.go);
+      countdownNumber.classList.remove('pop');
+      void countdownNumber.offsetWidth; // restart the pop animation
+      countdownNumber.classList.add('pop');
+      setTimeout(tick, COUNTDOWN_STEP_MS);
+    };
+    tick();
+  });
+}
+
+async function openSong(id, { withCountdown = false } = {}) {
   const res = await fetch(`/api/songs/${id}`);
   if (!res.ok) return;
   const song = await res.json();
@@ -306,6 +355,12 @@ async function openSong(id) {
 
   const useVideo = song.hasVideo && song.videoUrl && !lowLatencyMode;
 
+  // Started once playback actually begins (see startPlayback) rather than
+  // at load time — otherwise the countdown's few seconds of paused video
+  // would trip the "no playable data" watchdog on a perfectly good video
+  // that's just still buffering.
+  let startVideoWatchdog = null;
+
   if (useVideo) {
     bgVideoEl.src = song.videoUrl;
     bgVideoEl.classList.remove('hidden');
@@ -329,20 +384,35 @@ async function openSong(id) {
       showWavesBackground(song);
     };
     bgVideoEl.onerror = () => fallbackToWaves('error event');
-    setTimeout(() => {
-      if (bgVideoEl.readyState < 2) fallbackToWaves('no playable data after 3s');
-    }, 3000);
+    startVideoWatchdog = () => {
+      setTimeout(() => {
+        if (bgVideoEl.readyState < 2) fallbackToWaves('no playable data after 3s');
+      }, 3000);
+    };
   } else {
     bgVideoEl.classList.add('hidden');
     bgVideoEl.removeAttribute('src');
     showWavesBackground(song);
   }
 
-  audioEl.play().catch(() => {});
-  if (useVideo) bgVideoEl.play().catch(() => {});
+  const startPlayback = () => {
+    // A newer turn may have superseded this one during the countdown wait.
+    if (currentSongId !== song.id) return;
+    audioEl.play().catch(() => {});
+    if (useVideo) {
+      bgVideoEl.play().catch(() => {});
+      startVideoWatchdog?.();
+    }
+    cancelAnimationFrame(rafHandle);
+    tickLyrics();
+  };
 
-  cancelAnimationFrame(rafHandle);
-  tickLyrics();
+  if (withCountdown) {
+    await runCountdown();
+    startPlayback();
+  } else {
+    startPlayback();
+  }
 }
 
 function tickLyrics() {
@@ -362,26 +432,98 @@ function tickLyrics() {
   rafHandle = requestAnimationFrame(tickLyrics);
 }
 
-function stopPlayer() {
+// Pure UI teardown: stop playback and go back to the catalog. Does NOT
+// tell the server the turn ended — callers that need that (manual "Volver",
+// natural end) send 'endTurn' themselves so it happens exactly once.
+function returnToCatalog() {
   cancelAnimationFrame(rafHandle);
   audioEl.pause();
   audioEl.removeAttribute('src');
   bgVideoEl.pause();
   bgVideoEl.removeAttribute('src');
   currentSongId = null;
+  hideResults();
+  countdownOverlay.classList.add('hidden');
   playerStage.classList.add('hidden');
   catalogEl.classList.remove('hidden');
-
-  // Tell the server this turn's playback is over so the singer's phone
-  // stops capturing mic audio and gets a final score, instead of
-  // streaming indefinitely (see the 'endTurn' handler on /ws/room).
-  if (nowPlayingUserId && roomWs?.readyState === WebSocket.OPEN) {
-    roomWs.send(JSON.stringify({ type: 'endTurn', userId: nowPlayingUserId }));
-  }
   nowPlayingUserId = null;
   lastAutoPlayedSongId = null;
 }
 
+// Manual "Volver al catálogo" mid-song: end the turn right away, no results
+// screen (the singer chose to bail out, not finish).
+function stopPlayer() {
+  const finishedUserId = nowPlayingUserId;
+  returnToCatalog();
+  // Tell the server this turn's playback is over so the singer's phone
+  // stops capturing mic audio and gets a final score, instead of
+  // streaming indefinitely (see the 'endTurn' handler on /ws/room).
+  if (finishedUserId && roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'endTurn', userId: finishedUserId }));
+  }
+}
+
+// Natural end of the song: keep the stage up and show the results screen
+// (gracias + puntaje + quién sigue) instead of jumping straight back to the
+// catalog. The final score arrives in a later roomState (endTurn triggers
+// the phone's summary), so showResults fills it in when it lands.
+function onSongEnded() {
+  cancelAnimationFrame(rafHandle);
+  audioEl.pause();
+  bgVideoEl.pause();
+
+  const finishedUserId = nowPlayingUserId;
+  if (finishedUserId && roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'endTurn', userId: finishedUserId }));
+  }
+
+  showResults(finishedUserId);
+  // Allow this same song to be re-queued later; a fresh nowPlaying will
+  // replace the results screen with the next turn's countdown.
+  lastAutoPlayedSongId = null;
+}
+
+let pendingResultsUserId = null;
+
+function setResultsScore(score) {
+  const pct = score.max ? Math.round((score.total / score.max) * 100) : 0;
+  resultsScore.textContent = `${score.total} / ${score.max} — ${pct}%`;
+}
+
+function renderResultsNext() {
+  const next = latestQueue[0];
+  resultsNext.innerHTML = next
+    ? `Sigue: <strong>${escapeHtml(next.nickname)}</strong>${next.songTitle ? ` — ${escapeHtml(next.songTitle)}` : ''}`
+    : 'No hay nadie más en la cola.';
+}
+
+function showResults(finishedUserId) {
+  resultsTitle.textContent = currentTurnNickname
+    ? `¡Gracias, ${currentTurnNickname}!`
+    : '¡Gracias por participar!';
+
+  // Wait for THIS turn's score: the singer only reaches 'scored' after the
+  // server finishes this turn, so keying on that state avoids showing a
+  // stale lastScore left over from an earlier turn by the same person.
+  const singer = latestUsers.find((u) => u.id === finishedUserId);
+  if (singer?.state === 'scored' && singer.lastScore) {
+    setResultsScore(singer.lastScore);
+    pendingResultsUserId = null;
+  } else {
+    resultsScore.textContent = 'Calculando puntaje...';
+    pendingResultsUserId = finishedUserId;
+  }
+
+  renderResultsNext();
+  resultsOverlay.classList.remove('hidden');
+}
+
+function hideResults() {
+  resultsOverlay.classList.add('hidden');
+  pendingResultsUserId = null;
+}
+
+resultsContinue.addEventListener('click', returnToCatalog);
 backBtn.addEventListener('click', stopPlayer);
 
 fullscreenBtn.addEventListener('click', () => {
@@ -391,7 +533,7 @@ fullscreenBtn.addEventListener('click', () => {
     playerStage.requestFullscreen().catch((err) => console.warn('fullscreen unavailable', err));
   }
 });
-audioEl.addEventListener('ended', stopPlayer);
+audioEl.addEventListener('ended', onSongEnded);
 
 audioEl.addEventListener('timeupdate', () => {
   if (!audioEl.duration) return;
@@ -505,7 +647,10 @@ function handleNowPlaying(nowPlaying) {
   if (nowPlaying.songId === lastAutoPlayedSongId) return;
   lastAutoPlayedSongId = nowPlaying.songId;
   nowPlayingUserId = nowPlaying.userId ?? null;
-  openSong(nowPlaying.songId);
+  const singer = latestUsers.find((u) => u.id === nowPlayingUserId);
+  currentTurnNickname = singer?.nickname ?? null;
+  hideResults(); // a new turn supersedes any lingering results screen
+  openSong(nowPlaying.songId, { withCountdown: true });
 }
 
 function renderLowLatencyToggle(enabled) {
@@ -526,11 +671,27 @@ function connectRoom() {
   roomWs.onmessage = (evt) => {
     const data = JSON.parse(evt.data);
     if (data.type === 'roomState') {
+      latestUsers = data.users;
+      latestQueue = data.queue;
       renderUsers(data.users);
       renderQueue(data.queue);
       renderRanking(data.ranking);
       renderNetworkStatus(data.users);
       renderLowLatencyToggle(data.lowLatencyMode);
+
+      // Fill in the final score on the results screen once it lands, and
+      // keep "who's next" fresh if the queue shifts while it's showing.
+      if (!resultsOverlay.classList.contains('hidden')) {
+        if (pendingResultsUserId) {
+          const singer = latestUsers.find((u) => u.id === pendingResultsUserId);
+          if (singer?.state === 'scored' && singer.lastScore) {
+            setResultsScore(singer.lastScore);
+            pendingResultsUserId = null;
+          }
+        }
+        renderResultsNext();
+      }
+
       handleNowPlaying(data.nowPlaying);
     }
   };

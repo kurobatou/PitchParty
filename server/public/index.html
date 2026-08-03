@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Karaoke — Sala</title>
+  <title>PitchParty — Sala</title>
   <script>
     (function () {
       try {
@@ -24,7 +24,7 @@
     🔊 Tocá la pantalla una vez para activar el sonido y las ondas (el navegador lo exige antes de reproducir audio).
   </div>
   <header class="topbar">
-    <h1>🎤 Sala de Karaoke</h1>
+    <h1>🎤 PitchParty</h1>
     <div class="search-pill">
       <span class="search-icon">🔍</span>
       <input id="search" type="search" placeholder="Buscar canción o artista..." />
@@ -67,6 +67,20 @@
 
         <div class="progress-track-bottom">
           <div id="progress-fill" class="progress-fill"></div>
+        </div>
+
+        <div id="countdown-overlay" class="countdown-overlay hidden">
+          <span id="countdown-number" class="countdown-number"></span>
+        </div>
+
+        <div id="results-overlay" class="results-overlay hidden">
+          <div class="results-card">
+            <div class="results-emoji">🎉</div>
+            <h2 id="results-title">¡Gracias por participar!</h2>
+            <div id="results-score" class="results-score">Calculando puntaje...</div>
+            <div id="results-next" class="results-next"></div>
+            <button id="results-continue" type="button">Volver al catálogo</button>
+          </div>
         </div>
       </div>
     </div>
