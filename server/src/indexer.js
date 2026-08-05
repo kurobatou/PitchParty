@@ -6,7 +6,9 @@ import { upsertSong, removeMissingSongs, listSongs } from './db.js';
 
 function findTxtFile(folderAbsPath) {
   const entries = readdirSync(folderAbsPath);
-  return entries.find((name) => name.toLowerCase().endsWith('.txt')) ?? null;
+  // Skip macOS AppleDouble sidecar files ("._Song.txt") that appear on
+  // non-native volumes (e.g. a NAS) — they're binary metadata, not songs.
+  return entries.find((name) => name.toLowerCase().endsWith('.txt') && !name.startsWith('._')) ?? null;
 }
 
 function resolveAssetPath(folderAbsPath, fileName) {
