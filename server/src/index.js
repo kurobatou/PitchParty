@@ -91,6 +91,15 @@ reindexLibrary(db, currentLibraryPaths(), app.log);
 await app.register(fastifyStatic, {
   root: join(__dirname, '..', 'public'),
   prefix: '/',
+  // Always revalidate the UI files so a browser (phones especially) never runs
+  // a stale version after an update — it still gets a cheap 304 when nothing
+  // changed. Without this, a phone with the page cached keeps the old JS/HTML
+  // even after the server is restarted.
+  setHeaders(res, filePath) {
+    if (/\.(html|js|css)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    }
+  },
 });
 
 await app.register(fastifyWebsocket);
