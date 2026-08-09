@@ -25,6 +25,14 @@ export function loadSettings(defaults) {
       publicDomain: parsed.publicDomain ?? null,
       cloudflareApiToken: parsed.cloudflareApiToken ?? null,
       acmeEmail: parsed.acmeEmail ?? null,
+      // Physical mics (e.g. a Bluetooth mic paired to the Sala machine)
+      // assigned to a person who isn't using a phone. Each entry is
+      // { deviceId, label, nickname }; the Sala captures from deviceId and
+      // makes that person a normal queue participant. See localmics.js.
+      localMics: Array.isArray(parsed.localMics) ? parsed.localMics : [],
+      // Karaoke mic monitor: play a mic on THIS machine through the speakers
+      // while a song plays, ducking the music to `musicVolume` (0-100).
+      micMonitor: normalizeMicMonitor(parsed.micMonitor),
     };
   }
   return {
@@ -33,6 +41,17 @@ export function loadSettings(defaults) {
     publicDomain: null,
     cloudflareApiToken: null,
     acmeEmail: null,
+    localMics: [],
+    micMonitor: normalizeMicMonitor(null),
+  };
+}
+
+export function normalizeMicMonitor(m) {
+  const vol = Number(m?.musicVolume);
+  return {
+    enabled: Boolean(m?.enabled),
+    deviceId: typeof m?.deviceId === 'string' && m.deviceId ? m.deviceId : null,
+    musicVolume: Number.isFinite(vol) ? Math.max(0, Math.min(100, vol)) : 70,
   };
 }
 

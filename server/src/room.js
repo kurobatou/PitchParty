@@ -23,10 +23,18 @@ export class Room {
     this.lowLatencyMode = false;
     this.nowPlaying = null; // { songId, songTitle } — drives Sala auto-playback
     this.disconnectTimers = new Map(); // id -> Timeout, pending removal after grace period
+    this.mode = null; // 'karaoke' | 'ultrastar' | null — chosen once per Sala session on the landing
   }
 
   setLowLatencyMode(enabled) {
     this.lowLatencyMode = Boolean(enabled);
+  }
+
+  // The pantalla principal picks the session mode on the landing screen. null
+  // means "not chosen yet" → phones and the Sala show the mode picker. Only
+  // the two known modes (or a reset to null) are accepted.
+  setMode(mode) {
+    this.mode = mode === 'karaoke' || mode === 'ultrastar' ? mode : null;
   }
 
   join(socket, { nickname, role }) {
@@ -38,6 +46,7 @@ export class Room {
       state: 'connected',
       songId: null,
       songTitle: null,
+      duetMode: null, // 'duo' | 'solo' | null — how a duet song should play
       lastScore: null,
       latencyMs: null,
       socket,
@@ -57,6 +66,10 @@ export class Room {
     this.users.delete(id);
     this.queue = this.queue.filter((qid) => qid !== id);
     this.activeSingers.delete(id);
+    // If the removed user was the one on stage, clear it so the Sala doesn't
+    // stay stuck on a turn that no longer exists (e.g. a karaoke participant
+    // removed when their song ends).
+    if (this.nowPlaying?.userId === id) this.nowPlaying = null;
   }
 
   // Socket closed — don't drop the user immediately (see DISCONNECT_GRACE_MS
@@ -96,6 +109,28 @@ export class Room {
     return user;
   }
 
+  // Karaoke mode: the Sala adds a phone-less participant (a name + a song)
+  // straight to the queue. They have no socket and never stream mic audio —
+  // their turn just plays the song and, when it ends, they're removed (see the
+  // 'endTurn' handling for role 'karaoke' in index.js). Returns the new id.
+  addKaraokeSinger(nickname, songId, songTitle) {
+    const id = randomUUID();
+    this.users.set(id, {
+      id,
+      nickname: nickname || `Invitado-${id.slice(0, 4)}`,
+      role: 'karaoke',
+      state: 'queued',
+      songId,
+      songTitle,
+      lastScore: null,
+      latencyMs: null,
+      socket: null,
+      connected: true,
+    });
+    this.queue.push(id);
+    return id;
+  }
+
   // Called when a singer picks a song: puts them in line if they aren't
   // already queued or currently taking their turn.
   enqueue(id) {
@@ -114,7 +149,7 @@ export class Room {
     this.activeSingers.add(nextId);
     this.update(nextId, { state: 'called' });
     const user = this.users.get(nextId);
-    this.nowPlaying = { userId: nextId, songId: user.songId, songTitle: user.songTitle };
+    this.nowPlaying = { userId: nextId, songId: user.songId, songTitle: user.songTitle, duetMode: user.duetMode ?? null };
     return nextId;
   }
 
@@ -157,7 +192,8 @@ export class Room {
   broadcast(message) {
     const payload = JSON.stringify(message);
     for (const user of this.users.values()) {
-      if (user.socket.readyState === user.socket.OPEN) {
+      // Karaoke virtual singers have no socket — skip them.
+      if (user.socket && user.socket.readyState === user.socket.OPEN) {
         user.socket.send(payload);
       }
     }
@@ -174,6 +210,7 @@ export class Room {
       ranking: this.ranking.slice(0, 10),
       lowLatencyMode: this.lowLatencyMode,
       nowPlaying: this.nowPlaying,
+      mode: this.mode,
     });
   }
 }

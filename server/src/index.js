@@ -14,7 +14,7 @@ import { readUsdxTxtFile } from './txtEncoding.js';
 import { Room } from './room.js';
 import { getOrCreateCert } from './tls.js';
 import { ensureLetsEncryptCert } from './certManager.js';
-import { loadSettings, saveSettings } from './settings.js';
+import { loadSettings, saveSettings, normalizeMicMonitor } from './settings.js';
 import { detectPitch } from './pitch.js';
 import { ScoringSession, notesFromSongPayload } from './scoring.js';
 import { detectLanIp } from './netinfo.js';
@@ -126,6 +126,8 @@ app.get('/api/songs/:id', async (request, reply) => {
     mp3Url: row.mp3_path ? `/files/${row.id}/mp3` : null,
     videoUrl: row.video_path ? `/files/${row.id}/video` : null,
     lines: parsed.lines,
+    isDuet: parsed.meta.isDuet,
+    duetSingers: parsed.meta.duetSingers,
   };
 });
 
@@ -147,6 +149,8 @@ app.get('/api/settings', async () => {
     acmeEmail: settings.acmeEmail,
     cloudflareTokenSet: Boolean(settings.cloudflareApiToken),
     certInfo,
+    localMics: settings.localMics,
+    micMonitor: settings.micMonitor,
   };
 });
 
@@ -173,6 +177,24 @@ app.put('/api/settings', async (request, reply) => {
   }
   if (body.acmeEmail !== undefined) {
     next.acmeEmail = body.acmeEmail ? String(body.acmeEmail).trim() : null;
+  }
+
+  if (body.localMics !== undefined) {
+    if (!Array.isArray(body.localMics)) {
+      return reply.code(400).send({ error: 'localMics must be an array' });
+    }
+    // Mics are just *enabled* here (deviceId + a human label for the UI);
+    // the singer's name is assigned per-turn on the Sala, not stored.
+    next.localMics = body.localMics
+      .filter((m) => m && typeof m.deviceId === 'string' && m.deviceId)
+      .map((m) => ({
+        deviceId: m.deviceId,
+        label: typeof m.label === 'string' ? m.label : '',
+      }));
+  }
+
+  if (body.micMonitor !== undefined) {
+    next.micMonitor = normalizeMicMonitor(body.micMonitor);
   }
 
   settings = next;
@@ -216,6 +238,7 @@ app.put('/api/settings', async (request, reply) => {
     certAttempt,
     certRestartRequired: certAttempt?.ok === true,
     reindex: result,
+    localMics: settings.localMics,
   };
 });
 
@@ -321,12 +344,31 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
 
     if (msg.type === 'chooseSong') {
       const song = getSongById(db, Number(msg.songId));
+      const duetMode = msg.duetMode === 'duo' || msg.duetMode === 'solo' ? msg.duetMode : null;
       room.update(userId, {
         songId: song?.id ?? null,
         songTitle: song ? `${song.artist} — ${song.title}` : null,
+        duetMode,
       });
       if (song) room.enqueue(userId);
       room.broadcastState();
+      return;
+    }
+
+    // Phone changes its duo/solo choice for a duet while queued.
+    if (msg.type === 'setDuetMode') {
+      const duetMode = msg.duetMode === 'duo' || msg.duetMode === 'solo' ? msg.duetMode : null;
+      room.update(userId, { duetMode });
+      room.broadcastState();
+      return;
+    }
+
+    // Karaoke: the Sala relays its playback position so phones can sync the
+    // lyrics without a scoring channel. Relayed to everyone (tiny payload).
+    if (msg.type === 'karaokeProgress') {
+      const user = room.users.get(userId);
+      if (user?.role !== 'screen') return;
+      room.broadcast({ type: 'karaokeProgress', songId: msg.songId, positionMs: msg.positionMs });
       return;
     }
 
@@ -344,6 +386,15 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
       const user = room.users.get(userId);
       if (user?.role !== 'screen') return;
 
+      // Karaoke participant: no score, no lingering — just remove them so the
+      // next turn is clean.
+      const target = room.users.get(msg.userId);
+      if (target?.role === 'karaoke') {
+        room.remove(msg.userId);
+        room.broadcastState();
+        return;
+      }
+
       const session = activeSingSessions.get(msg.userId);
       if (session) {
         session.stopWithSummary();
@@ -360,6 +411,27 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
       const user = room.users.get(userId);
       if (user?.role !== 'screen') return; // only the pantalla principal controls this (plan §9)
       room.setLowLatencyMode(msg.enabled);
+      room.broadcastState();
+      return;
+    }
+
+    // The pantalla principal picks the session mode (Karaoke / UltraStar) on
+    // the landing, or resets to the picker (mode:null). Phones inherit it.
+    if (msg.type === 'setMode') {
+      const user = room.users.get(userId);
+      if (user?.role !== 'screen') return;
+      room.setMode(msg.mode);
+      room.broadcastState();
+      return;
+    }
+
+    // Karaoke mode: the Sala enqueues a phone-less participant (name + song).
+    if (msg.type === 'addKaraokeSinger') {
+      const user = room.users.get(userId);
+      if (user?.role !== 'screen') return;
+      const song = getSongById(db, Number(msg.songId));
+      if (!song) return;
+      room.addKaraokeSinger(msg.nickname, song.id, `${song.artist} — ${song.title}`);
       room.broadcastState();
       return;
     }
