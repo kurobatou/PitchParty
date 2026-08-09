@@ -44,11 +44,12 @@ Solo se lee una vez, al arrancar (`config.js`), como valor de arranque de `libra
   "lanIpOverride": null,
   "publicDomain": null,
   "cloudflareApiToken": null,
-  "acmeEmail": null
+  "acmeEmail": null,
+  "localMics": [{ "deviceId": "…", "label": "Bluetooth Mic" }]
 }
 ```
 
-Todos los campos son opcionales salvo `libraryPaths` (si falta, cae al default de `config.json`). `cloudflareApiToken` queda **en texto plano en este archivo** — es intencional (no hay otro almacén de secretos en este proyecto) pero vale la pena tenerlo presente si `server/data/` alguna vez se respalda o se comparte.
+Todos los campos son opcionales salvo `libraryPaths` (si falta, cae al default de `config.json`). `localMics` es la lista de micrófonos físicos **habilitados** para usar desde la Sala (no lleva nombre de cantante — eso se elige por turno en la Sala); el `deviceId` es el que expone `enumerateDevices()`, estable mientras el permiso de mic persista en ese navegador/origen. `cloudflareApiToken` queda **en texto plano en este archivo** — es intencional (no hay otro almacén de secretos en este proyecto) pero vale la pena tenerlo presente si `server/data/` alguna vez se respalda o se comparte.
 
 ## 4.3 Estado de sesión — `Room` (en memoria, `server/src/room.js`)
 

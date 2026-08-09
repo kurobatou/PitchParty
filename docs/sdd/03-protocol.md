@@ -11,8 +11,8 @@ Base: `https://<ip-o-dominio>:<PORT>` (HTTPS siempre, ver [02-architecture.md](0
 | `GET` | `/api/songs` | Lista el catálogo completo. | `[{ id, title, artist, language, year, bpm, hasVideo, coverUrl }]` |
 | `GET` | `/api/songs/:id` | Detalle de una canción, incluyendo letra parseada. | Como arriba + `videogap, gap, mp3Url, videoUrl, lines` (lines = salida de `parseUsdxTxt`). `404` si no existe. |
 | `POST` | `/api/reindex` | Re-escanea todas las carpetas de biblioteca configuradas. | `{ indexed, skipped, removed, total }` |
-| `GET` | `/api/settings` | Estado actual de configuración. | `{ libraryPaths, libraryPathStatus, lanIpOverride, detectedLanIp, effectiveLanIp, publicDomain, acmeEmail, cloudflareTokenSet, certInfo }` |
-| `PUT` | `/api/settings` | Actualiza configuración (parcial — solo se tocan los campos presentes en el body). Si cambian `libraryPaths`, reindexá automáticamente. Si cambian `publicDomain`/`cloudflareApiToken`, intenta emitir/renovar el certificado Let's Encrypt ahí mismo (falla rápido si el token/dominio están mal). | Mismo shape que `GET` + `lanIpRestartRequired`, `certAttempt`, `certRestartRequired`, `reindex`. **El cambio de IP o de certificado solo aplica después de reiniciar el proceso** — el body puede pedir `libraryPaths` (array de strings), `lanIpOverride`, `publicDomain`, `cloudflareApiToken`, `acmeEmail`. |
+| `GET` | `/api/settings` | Estado actual de configuración. | `{ libraryPaths, libraryPathStatus, lanIpOverride, detectedLanIp, effectiveLanIp, publicDomain, acmeEmail, cloudflareTokenSet, certInfo, localMics }` |
+| `PUT` | `/api/settings` | Actualiza configuración (parcial — solo se tocan los campos presentes en el body). Si cambian `libraryPaths`, reindexá automáticamente. Si cambian `publicDomain`/`cloudflareApiToken`, intenta emitir/renovar el certificado Let's Encrypt ahí mismo (falla rápido si el token/dominio están mal). | Mismo shape que `GET` + `lanIpRestartRequired`, `certAttempt`, `certRestartRequired`, `reindex`. **El cambio de IP o de certificado solo aplica después de reiniciar el proceso** — el body puede pedir `libraryPaths` (array de strings), `lanIpOverride`, `publicDomain`, `cloudflareApiToken`, `acmeEmail`, `localMics` (array de `{deviceId, label?}` — micrófonos físicos habilitados; las entradas sin `deviceId` se descartan). |
 | `POST` | `/api/browse-folder` | Abre el selector de carpetas nativo del SO (usado por "Buscar carpeta..." en Configuración). | `{ path }`, o `501` si el SO no tiene un diálogo nativo disponible. |
 | `GET` | `/api/qr?text=<url>` | Genera un QR para la URL indicada. | `{ dataUrl }` (PNG en base64, 320px). |
 | `GET` | `/files/:id/:kind` | Sirve el archivo binario de una canción. `kind` ∈ `mp3`, `video`, `cover`. | Stream del archivo, o `404` si esa canción no tiene ese archivo. |
@@ -21,7 +21,7 @@ Todo lo demás (`server/public/*`) se sirve como estático desde la raíz (`@fas
 
 ## WebSocket `/ws/room`
 
-Canal de control de la sala. Lo usan tanto la Sala (`role: "screen"`) como cada celular (`role: "singer"` | `"guest"`). Un socket puede mandar varios mensajes durante su vida; el servidor no espera un orden salvo que `join`/`rejoin` sea el primero.
+Canal de control de la sala. Lo usan tanto la Sala (`role: "screen"`) como cada celular (`role: "singer"` | `"guest"`). Un micrófono físico configurado en la Sala (ver `localmics.js`) abre un socket adicional y se une como `role: "singer"` — desde el servidor es indistinguible de un celular. Un socket puede mandar varios mensajes durante su vida; el servidor no espera un orden salvo que `join`/`rejoin` sea el primero.
 
 ### Cliente → servidor
 

@@ -5,3 +5,9 @@ server/data/
 /songs/
 .env
 .claude/settings.local.json
+scripts/
+
+# Reportes y manifiestos generados por los scripts locales
+*-report.txt
+*-manifest.tsv
+
