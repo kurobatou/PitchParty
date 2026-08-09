@@ -495,23 +495,33 @@ html, body {
 .lyrics {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  width: 100%;
+  gap: clamp(6px, 1vw, 16px);
+  max-width: 92%;
+  box-sizing: border-box;
+  /* Panel semitransparente detrás de la letra para que se lea bien sobre el
+     video. El blur difumina el video justo detrás del texto. */
+  background: rgba(10, 12, 22, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 22px;
+  padding: clamp(14px, 2.2vw, 34px) clamp(22px, 4vw, 64px);
 }
 
 .lyrics-line {
-  font-size: 28px;
-  min-height: 40px;
+  /* Escala con el tamaño de la pantalla: en un TV grande a pantalla completa
+     (viewport = resolución) la letra crece automáticamente. */
+  font-size: clamp(1.4rem, 3vw, 3rem);
+  min-height: 1.4em;
 }
 
 .lyrics-prev, .lyrics-next {
-  font-size: 26px;
+  font-size: clamp(1.2rem, 2.6vw, 2.6rem);
   opacity: 0.5;
   color: #fff;
 }
 
 .lyrics-current {
-  font-size: 40px;
+  font-size: clamp(2rem, 4.6vw, 4.75rem);
   font-weight: 700;
   color: var(--accent2);
 }
@@ -1291,6 +1301,17 @@ html, body {
 :root[data-duet] .lyrics-current[data-player="3"],
 :root[data-duet] .lyrics-prev[data-player="3"],
 :root[data-duet] .lyrics-next[data-player="3"] { color: var(--voice3); }
+
+/* Mismos colores por voz en la letra del celular (.lyrics-preview) */
+:root[data-duet] .lyrics-preview .prev[data-player="1"],
+:root[data-duet] .lyrics-preview .current[data-player="1"],
+:root[data-duet] .lyrics-preview .next[data-player="1"] { color: var(--voice1); }
+:root[data-duet] .lyrics-preview .prev[data-player="2"],
+:root[data-duet] .lyrics-preview .current[data-player="2"],
+:root[data-duet] .lyrics-preview .next[data-player="2"] { color: var(--voice2); }
+:root[data-duet] .lyrics-preview .prev[data-player="3"],
+:root[data-duet] .lyrics-preview .current[data-player="3"],
+:root[data-duet] .lyrics-preview .next[data-player="3"] { color: var(--voice3); }
 
 .duet-legend {
   display: flex;

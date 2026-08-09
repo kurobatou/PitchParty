@@ -775,7 +775,7 @@ const karaokeAnnounceSong = document.getElementById('karaoke-announce-song');
 const karaokeAnnounceCount = document.getElementById('karaoke-announce-count');
 // Wait between songs in Karaoke: the announce card counts down this long so
 // the next singer can get ready before the song starts.
-const KARAOKE_ANNOUNCE_SECONDS = 15;
+const KARAOKE_ANNOUNCE_SECONDS = 10;
 let announceTimer = null;
 
 // Clicking a catalog song: in UltraStar it plays right away (asking duo/solo
@@ -1038,9 +1038,17 @@ function connectRoom() {
 }
 
 document.getElementById('advance-btn').addEventListener('click', () => {
-  if (roomWs?.readyState === WebSocket.OPEN) {
-    roomWs.send(JSON.stringify({ type: 'advanceQueue' }));
+  if (roomWs?.readyState !== WebSocket.OPEN) return;
+  // If a turn is in progress, end it before pulling the next singer in —
+  // otherwise the current singer's phone stays stuck on "your turn" forever
+  // (the server never released them). Capture the id before returnToCatalog
+  // clears it, and stop the Sala's own playback so the next turn starts clean.
+  const finishing = nowPlayingUserId;
+  if (finishing) {
+    roomWs.send(JSON.stringify({ type: 'endTurn', userId: finishing }));
+    returnToCatalog();
   }
+  roomWs.send(JSON.stringify({ type: 'advanceQueue' }));
 });
 
 document.getElementById('low-latency-toggle').addEventListener('click', () => {

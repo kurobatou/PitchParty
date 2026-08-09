@@ -381,6 +381,10 @@ singAgainBtn.addEventListener('click', async () => {
   maxScoreEl.textContent = '0';
   scorePctEl.classList.add('hidden');
   phoneNextUpEl.classList.add('hidden');
+  stopKaraokeLyrics();
+  lyricsPreviewEl.classList.add('hidden');
+  phoneDuetToggle.classList.add('hidden');
+  delete document.documentElement.dataset.duet;
   stepSing.classList.add('hidden');
   stepSong.classList.remove('hidden');
   songSearchEl.value = '';
@@ -426,6 +430,8 @@ async function selectSong(songId) {
   stepSong.classList.add('hidden');
   stepSing.classList.remove('hidden');
   updateDuetToggleUI('queued');
+  singAgainBtn.textContent = '🔁 Cambiar mi canción';
+  singAgainBtn.classList.remove('hidden');
 
   unlockAlertAudio();
   requestWakeLock();
@@ -532,7 +538,14 @@ function routeToStep(self) {
     stepGuest.classList.add('hidden');
     stepSong.classList.add('hidden');
     stepSing.classList.remove('hidden');
-    if (self.state === 'scored') singAgainBtn.classList.remove('hidden');
+    // Let the singer swap their song while still waiting, or pick again after
+    // being scored. Hidden once it's actually their turn (called/singing).
+    if (self.state === 'queued' || self.state === 'scored') {
+      singAgainBtn.textContent = self.state === 'queued' ? '🔁 Cambiar mi canción' : '🎤 Elegir otra canción';
+      singAgainBtn.classList.remove('hidden');
+    } else {
+      singAgainBtn.classList.add('hidden');
+    }
   } else {
     stepGuest.classList.add('hidden');
     stepSing.classList.add('hidden');
@@ -541,6 +554,7 @@ function routeToStep(self) {
     // linger, and clear the duet choice for the next pick.
     stopKaraokeLyrics();
     lyricsPreviewEl.classList.add('hidden');
+    delete document.documentElement.dataset.duet;
     activeLines = [];
     selectedIsDuet = false;
     phoneDuetToggle.classList.add('hidden');
@@ -645,10 +659,17 @@ async function loadLyricsFor(songId) {
         const endBeat = lastNote.beat + lastNote.length;
         return {
           text: lineText(l),
+          player: l.player ?? 1,
           startMs: beatToMs(startBeat, song.bpm, song.gap),
           endMs: beatToMs(endBeat, song.bpm, song.gap),
         };
-      });
+      })
+      // Duets list voice 1's whole track then voice 2's — sort by time so both
+      // voices interleave (same as the Sala).
+      .sort((a, b) => a.startMs - b.startMs);
+    // Colour the lyric lines by voice only when it's a duet played as a duo.
+    if (selectedIsDuet && selectedDuetMode === 'duo') document.documentElement.dataset.duet = '1';
+    else delete document.documentElement.dataset.duet;
   } catch (err) {
     console.warn('could not load lyrics for phone preview', err);
     activeLines = [];
@@ -702,23 +723,29 @@ function updateEqualizer(hit, expectedMidi) {
   }
 }
 
+function setPhoneLine(el, line) {
+  el.textContent = line ? line.text : '';
+  if (line) el.dataset.player = line.player;
+  else delete el.dataset.player;
+}
+
 function updateLyricsPreview(elapsedMs) {
   if (activeLines.length === 0) return;
   elapsedMs += LYRICS_LEAD_MS;
   let idx = activeLines.findIndex((l) => elapsedMs < l.endMs);
   if (idx === -1) idx = activeLines.length - 1;
 
-  phoneLyricsPrevEl.textContent = idx > 0 ? activeLines[idx - 1].text : '';
+  setPhoneLine(phoneLyricsPrevEl, idx > 0 ? activeLines[idx - 1] : null);
 
   if (elapsedMs < activeLines[idx].startMs) {
     // Between lines: nothing active yet, so what's "current" is really
     // still coming up — show it as the preview instead of leaving both
     // blank.
-    phoneLyricsCurrentEl.textContent = '';
-    phoneLyricsNextEl.textContent = activeLines[idx].text;
+    setPhoneLine(phoneLyricsCurrentEl, null);
+    setPhoneLine(phoneLyricsNextEl, activeLines[idx]);
   } else {
-    phoneLyricsCurrentEl.textContent = activeLines[idx].text;
-    phoneLyricsNextEl.textContent = activeLines[idx + 1]?.text ?? '';
+    setPhoneLine(phoneLyricsCurrentEl, activeLines[idx]);
+    setPhoneLine(phoneLyricsNextEl, activeLines[idx + 1] ?? null);
   }
 }
 
