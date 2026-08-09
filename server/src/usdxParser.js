@@ -25,6 +25,10 @@ export function parseUsdxTxt(rawText) {
   const bpmChanges = [];
   let relative = false;
   let relativeOffset = 0;
+  // Duet support: "P 1"/"P 2"/"P 3" markers split the notes into voices. Until
+  // the first marker (or in a solo song) everything is voice 1.
+  let currentPlayer = 1;
+  let sawMultiplePlayers = false;
 
   const pushCurrentLine = () => {
     if (currentLine && currentLine.notes.length > 0) {
@@ -52,6 +56,16 @@ export function parseUsdxTxt(rawText) {
       break;
     }
 
+    if (type === 'P') {
+      // Duet player marker ("P 1" / "P2" / "P 3"): the notes that follow belong
+      // to this voice until the next marker. Flush the line in progress first.
+      pushCurrentLine();
+      const n = parseNumber(line.slice(1).trim());
+      currentPlayer = n >= 1 ? n : 1;
+      if (currentPlayer >= 2) sawMultiplePlayers = true;
+      continue;
+    }
+
     if (type === '-') {
       pushCurrentLine();
       const parts = line.slice(1).trim().split(/\s+/).map(parseNumber);
@@ -70,8 +84,13 @@ export function parseUsdxTxt(rawText) {
     }
 
     if (NOTE_TYPES[type]) {
-      const rest = line.slice(1).trim();
-      const match = rest.match(/^(-?\d+)\s+(-?\d+)\s+(-?\d+)\s?(.*)$/);
+      // Do NOT trim: in UltraStar the space that separates words lives at the
+      // edge of a syllable's text. Some files put it trailing ("ber "), others
+      // leading ("  the"). Trimming ate the trailing kind and glued words
+      // together. Absorb only the space after the type char (^\s*) and keep the
+      // text's own edge spaces intact.
+      const rest = line.slice(1);
+      const match = rest.match(/^\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s?(.*)$/);
       if (!match) continue;
       const [, beatStr, lengthStr, pitchStr, text] = match;
       const beat = parseNumber(beatStr) + (relative ? relativeOffset : 0);
@@ -82,7 +101,7 @@ export function parseUsdxTxt(rawText) {
         pitch: parseNumber(pitchStr),
         text,
       };
-      if (!currentLine) currentLine = { type: 'lyrics', notes: [] };
+      if (!currentLine) currentLine = { type: 'lyrics', notes: [], player: currentPlayer };
       currentLine.notes.push(note);
       continue;
     }
@@ -107,6 +126,12 @@ export function parseUsdxTxt(rawText) {
       cover: meta.COVER ?? null,
       video: meta.VIDEO ?? null,
       background: meta.BACKGROUND ?? null,
+      isDuet: sawMultiplePlayers || Boolean(meta.DUETSINGERP2),
+      duetSingers: {
+        1: meta.DUETSINGERP1 ?? null,
+        2: meta.DUETSINGERP2 ?? null,
+        3: meta.DUETSINGERP3 ?? null,
+      },
     },
     bpmChanges,
     lines: lyricLines,
