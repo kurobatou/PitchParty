@@ -97,6 +97,60 @@
     </section>
 
     <section class="settings-card">
+      <h2>Micrófonos físicos (sin celular)</h2>
+      <p class="settings-hint">
+        Para quienes cantan con un micrófono conectado a <strong>este equipo</strong> (por ejemplo uno
+        Bluetooth emparejado a la Sala) en lugar del celular. Acá solo <strong>elegís qué micrófonos van a
+        estar disponibles</strong>; el nombre del cantante y la prueba del micrófono se hacen después, en la
+        Sala, justo antes de cada turno.
+      </p>
+
+      <div class="settings-row">
+        <button id="enable-mics-btn" type="button" class="primary-btn">Detectar micrófonos</button>
+        <span id="mics-status" class="settings-status"></span>
+      </div>
+
+      <ul id="mic-list" class="library-list"></ul>
+
+      <div class="settings-row">
+        <button id="save-mics-btn" type="button" class="primary-btn">Guardar selección</button>
+        <span id="save-mics-status" class="settings-status"></span>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <h2>Monitor de micrófono (Karaoke)</h2>
+      <p class="settings-hint">
+        En modo <strong>Karaoke</strong>, reproduce un micrófono de <strong>este equipo</strong> por los
+        parlantes mientras suena la canción, y baja la música al nivel que elijas. Primero tocá
+        <strong>"Detectar micrófonos"</strong> arriba para que aparezcan los dispositivos.
+        Ojo: el monitoreo por software agrega algo de latencia (más si el micrófono es Bluetooth) y, si el
+        micrófono está cerca de los parlantes, puede acoplar (feedback).
+      </p>
+
+      <label class="mic-toggle">
+        <input type="checkbox" id="monitor-enabled" />
+        <span class="path-text">Activar monitor de micrófono en Karaoke</span>
+      </label>
+
+      <div class="settings-row">
+        <span class="settings-label">Micrófono:</span>
+        <select id="monitor-device"></select>
+      </div>
+
+      <div class="settings-row">
+        <span class="settings-label">Volumen de la música:</span>
+        <input type="range" id="monitor-volume" min="0" max="100" step="5" />
+        <span id="monitor-volume-val">70%</span>
+      </div>
+
+      <div class="settings-row">
+        <button id="save-monitor-btn" type="button" class="primary-btn">Guardar monitor</button>
+        <span id="monitor-status" class="settings-status"></span>
+      </div>
+    </section>
+
+    <section class="settings-card">
       <h2>Prueba de micrófono</h2>
       <p class="settings-hint">
         Página simple para probar que el micrófono y la puntuación funcionan, sin pasar por la cola de

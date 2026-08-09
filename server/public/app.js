@@ -255,7 +255,7 @@ function renderCatalog(songs) {
   for (const song of songs) {
     const card = document.createElement('div');
     card.className = 'song-card';
-    card.addEventListener('click', () => openSong(song.id));
+    card.addEventListener('click', () => onCatalogPick(song));
 
     const cover = document.createElement('img');
     cover.className = 'song-cover';
@@ -326,7 +326,7 @@ function runCountdown() {
   });
 }
 
-async function openSong(id, { withCountdown = false } = {}) {
+async function openSong(id, { withCountdown = false, ask = false, duetMode = null } = {}) {
   const res = await fetch(`/api/songs/${id}`);
   if (!res.ok) return;
   const song = await res.json();
@@ -334,6 +334,15 @@ async function openSong(id, { withCountdown = false } = {}) {
   currentSongId = song.id;
   titleEl.textContent = song.title;
   artistEl.textContent = song.artist;
+
+  // Decide how this duet plays: an explicit duetMode wins (e.g. from the
+  // queue); otherwise ask when it's a manual catalog pick; default to duo.
+  currentDuetSingers = song.isDuet ? song.duetSingers : null;
+  duetPlayMode = 'duo';
+  if (song.isDuet) {
+    if (duetMode === 'solo' || duetMode === 'duo') duetPlayMode = duetMode;
+    else if (ask) duetPlayMode = await askDuetMode(song);
+  }
 
   activeLines = song.lines
     .filter((l) => l.type === 'lyrics')
@@ -343,10 +352,17 @@ async function openSong(id, { withCountdown = false } = {}) {
       const endBeat = lastNote.beat + lastNote.length;
       return {
         text: lineText(l),
+        player: l.player ?? 1,
         startMs: beatToMs(startBeat, song.bpm, song.gap),
         endMs: beatToMs(endBeat, song.bpm, song.gap),
       };
-    });
+    })
+    // Duet files list voice 1's whole track then voice 2's; sort by time so
+    // both voices interleave chronologically (harmless for solo songs, which
+    // are already ordered).
+    .sort((a, b) => a.startMs - b.startMs);
+
+  applyDuetForMode();
 
   audioEl.src = song.mp3Url;
   progressFillEl.style.width = '0%';
@@ -398,6 +414,13 @@ async function openSong(id, { withCountdown = false } = {}) {
   const startPlayback = () => {
     // A newer turn may have superseded this one during the countdown wait.
     if (currentSongId !== song.id) return;
+    // Karaoke mic monitor: duck the music and play the mic through the speakers.
+    if (currentMode === 'karaoke' && micMonitorConfig.enabled) {
+      audioEl.volume = Math.max(0, Math.min(1, micMonitorConfig.musicVolume / 100));
+      startMicMonitor();
+    } else {
+      audioEl.volume = 1;
+    }
     audioEl.play().catch(() => {});
     if (useVideo) {
       bgVideoEl.play().catch(() => {});
@@ -405,6 +428,17 @@ async function openSong(id, { withCountdown = false } = {}) {
     }
     cancelAnimationFrame(rafHandle);
     tickLyrics();
+
+    // Karaoke: stream the playback position to phones so they can sync the
+    // lyrics (they have no scoring channel to get the time from).
+    clearInterval(karaokeProgressTimer);
+    if (currentMode === 'karaoke') {
+      karaokeProgressTimer = setInterval(() => {
+        if (roomWs?.readyState === WebSocket.OPEN) {
+          roomWs.send(JSON.stringify({ type: 'karaokeProgress', songId: song.id, positionMs: Math.round(audioEl.currentTime * 1000) }));
+        }
+      }, 400);
+    }
   };
 
   if (withCountdown) {
@@ -415,21 +449,96 @@ async function openSong(id, { withCountdown = false } = {}) {
   }
 }
 
+// Sets a lyric slot's text and, for duets, tags it with the voice so CSS can
+// color it. `line` null clears both.
+function setLine(el, line) {
+  el.textContent = line ? line.text : '';
+  if (line) el.dataset.player = line.player;
+  else delete el.dataset.player;
+}
+
 function tickLyrics() {
   const nowMs = audioEl.currentTime * 1000;
   let idx = activeLines.findIndex((l) => nowMs < l.endMs);
   if (idx === -1) idx = activeLines.length - 1;
 
+  const prev = idx > 0 ? activeLines[idx - 1] : null;
   if (idx >= 0 && nowMs < activeLines[idx].startMs) {
-    prevEl.textContent = idx > 0 ? activeLines[idx - 1].text : '';
-    currentEl.textContent = '';
-    nextEl.textContent = activeLines[idx].text;
+    setLine(prevEl, prev);
+    setLine(currentEl, null);
+    setLine(nextEl, activeLines[idx]);
   } else if (idx >= 0) {
-    prevEl.textContent = idx > 0 ? activeLines[idx - 1].text : '';
-    currentEl.textContent = activeLines[idx].text;
-    nextEl.textContent = activeLines[idx + 1]?.text ?? '';
+    setLine(prevEl, prev);
+    setLine(currentEl, activeLines[idx]);
+    setLine(nextEl, activeLines[idx + 1] ?? null);
   }
   rafHandle = requestAnimationFrame(tickLyrics);
+}
+
+// Duet play mode for the current song: 'duo' colors the two voices and shows
+// the legend; 'solo' merges them into one plain stream (one person sings all).
+// currentDuetSingers is the song's { 1, 2, 3 } names, or null when it's a solo
+// song (then the toggle stays hidden and mode is irrelevant).
+let duetPlayMode = 'duo';
+let currentDuetSingers = null;
+const duetLegendEl = document.getElementById('duet-legend');
+const duetToggleBtn = document.getElementById('duet-toggle');
+
+// Paints the lyric colors + legend from `singers`, or clears them (solo/no
+// duet) when passed null.
+function applyDuet(singers) {
+  if (!singers) {
+    delete document.documentElement.dataset.duet;
+    duetLegendEl.classList.add('hidden');
+    duetLegendEl.innerHTML = '';
+    return;
+  }
+  document.documentElement.dataset.duet = '1';
+  const labels = { 1: singers[1] || 'Voz 1', 2: singers[2] || 'Voz 2', 3: singers[3] || 'Ambos' };
+  const voices = singers[3] ? [1, 2, 3] : [1, 2];
+  duetLegendEl.innerHTML = voices
+    .map((p) => `<span class="duet-voice" data-player="${p}"><span class="duet-dot"></span>${escapeHtml(labels[p])}</span>`)
+    .join('');
+  duetLegendEl.classList.remove('hidden');
+}
+
+// Reflects currentDuetSingers + duetPlayMode into the lyric colors and the
+// player toggle button.
+function applyDuetForMode() {
+  applyDuet(currentDuetSingers && duetPlayMode === 'duo' ? currentDuetSingers : null);
+  if (currentDuetSingers) {
+    duetToggleBtn.textContent = duetPlayMode === 'duo' ? '🎭 Dúo' : '🙂 Solista';
+    duetToggleBtn.classList.remove('hidden');
+  } else {
+    duetToggleBtn.classList.add('hidden');
+  }
+}
+
+duetToggleBtn.addEventListener('click', () => {
+  if (!currentDuetSingers) return;
+  duetPlayMode = duetPlayMode === 'duo' ? 'solo' : 'duo';
+  applyDuetForMode();
+});
+
+// Small blocking chooser shown when a duet is picked from the catalog. Resolves
+// to 'duo' or 'solo'.
+const duetChooseOverlay = document.getElementById('duet-choose-overlay');
+const duetChooseSong = document.getElementById('duet-choose-song');
+function askDuetMode(song) {
+  return new Promise((resolve) => {
+    duetChooseSong.textContent = `${song.artist} — ${song.title}`;
+    duetChooseOverlay.classList.remove('hidden');
+    const done = (mode) => {
+      duetChooseOverlay.classList.add('hidden');
+      document.getElementById('duet-choose-duo').removeEventListener('click', onDuo);
+      document.getElementById('duet-choose-solo').removeEventListener('click', onSolo);
+      resolve(mode);
+    };
+    const onDuo = () => done('duo');
+    const onSolo = () => done('solo');
+    document.getElementById('duet-choose-duo').addEventListener('click', onDuo);
+    document.getElementById('duet-choose-solo').addEventListener('click', onSolo);
+  });
 }
 
 // Pure UI teardown: stop playback and go back to the catalog. Does NOT
@@ -439,15 +548,23 @@ function returnToCatalog() {
   cancelAnimationFrame(rafHandle);
   audioEl.pause();
   audioEl.removeAttribute('src');
+  audioEl.volume = 1; // undo any Karaoke ducking
   bgVideoEl.pause();
   bgVideoEl.removeAttribute('src');
   currentSongId = null;
   hideResults();
+  currentDuetSingers = null;
+  duetPlayMode = 'duo';
+  applyDuetForMode();
+  clearInterval(announceTimer);
+  clearInterval(karaokeProgressTimer);
+  karaokeAnnounceEl.classList.add('hidden');
   countdownOverlay.classList.add('hidden');
   playerStage.classList.add('hidden');
   catalogEl.classList.remove('hidden');
   nowPlayingUserId = null;
   lastAutoPlayedSongId = null;
+  lastTurnKey = null;
 }
 
 // Manual "Volver al catálogo" mid-song: end the turn right away, no results
@@ -476,11 +593,23 @@ function onSongEnded() {
   if (finishedUserId && roomWs?.readyState === WebSocket.OPEN) {
     roomWs.send(JSON.stringify({ type: 'endTurn', userId: finishedUserId }));
   }
+  // Allow this same song to be re-queued later; a fresh nowPlaying replaces
+  // the results/announce with the next turn.
+  lastAutoPlayedSongId = null;
+  lastTurnKey = null;
+
+  // Karaoke: no score screen. Go back to the catalog and pull the next singer
+  // in — the next roomState's nowPlaying will announce + play them (or nothing
+  // if the queue is empty).
+  if (currentMode === 'karaoke') {
+    returnToCatalog();
+    if (roomWs?.readyState === WebSocket.OPEN) {
+      roomWs.send(JSON.stringify({ type: 'advanceQueue' }));
+    }
+    return;
+  }
 
   showResults(finishedUserId);
-  // Allow this same song to be re-queued later; a fresh nowPlaying will
-  // replace the results screen with the next turn's countdown.
-  lastAutoPlayedSongId = null;
 }
 
 let pendingResultsUserId = null;
@@ -639,19 +768,220 @@ function renderNetworkStatus(users) {
   }
 }
 
+// --- Karaoke: catalog pick → name modal → queue; announce before each turn ---
+const karaokeAnnounceEl = document.getElementById('karaoke-announce');
+const karaokeAnnounceName = document.getElementById('karaoke-announce-name');
+const karaokeAnnounceSong = document.getElementById('karaoke-announce-song');
+const karaokeAnnounceCount = document.getElementById('karaoke-announce-count');
+// Wait between songs in Karaoke: the announce card counts down this long so
+// the next singer can get ready before the song starts.
+const KARAOKE_ANNOUNCE_SECONDS = 15;
+let announceTimer = null;
+
+// Clicking a catalog song: in UltraStar it plays right away (asking duo/solo
+// for duets); in Karaoke it asks who's singing and queues them.
+function onCatalogPick(song) {
+  if (currentMode === 'karaoke') openKaraokeNameModal(song);
+  else openSong(song.id, { ask: true });
+}
+
+function openKaraokeNameModal(song) {
+  const overlay = document.createElement('div');
+  overlay.className = 'mic-modal-overlay';
+  overlay.innerHTML = `
+    <div class="mic-modal">
+      <h3>Agregar a la cola</h3>
+      <div class="karaoke-modal-song">${escapeHtml(song.artist)} — ${escapeHtml(song.title)}</div>
+      <label class="mic-modal-label">¿Quién canta?</label>
+      <input type="text" id="karaoke-name" placeholder="Nombre del participante" autocomplete="off" />
+      <div class="mic-modal-actions">
+        <button type="button" id="karaoke-cancel">Cancelar</button>
+        <button type="button" id="karaoke-confirm" class="primary-btn" disabled>Agregar a la cola</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const nameEl = overlay.querySelector('#karaoke-name');
+  const confirmBtn = overlay.querySelector('#karaoke-confirm');
+  const close = () => overlay.remove();
+  const submit = () => {
+    const nickname = nameEl.value.trim();
+    if (!nickname) return;
+    if (roomWs?.readyState === WebSocket.OPEN) {
+      roomWs.send(JSON.stringify({ type: 'addKaraokeSinger', nickname, songId: song.id }));
+    }
+    close();
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#karaoke-cancel').addEventListener('click', close);
+  nameEl.addEventListener('input', () => { confirmBtn.disabled = !nameEl.value.trim(); });
+  nameEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  confirmBtn.addEventListener('click', submit);
+  nameEl.focus();
+}
+
+// Full-stage "Ahora canta X" card, shown with a live countdown before playback.
+function showKaraokeAnnounce(nickname, songTitle, onDone) {
+  karaokeAnnounceName.textContent = nickname || 'Invitado';
+  karaokeAnnounceSong.textContent = songTitle || '';
+  catalogEl.classList.add('hidden');
+  playerStage.classList.remove('hidden');
+  karaokeAnnounceEl.classList.remove('hidden');
+  clearInterval(announceTimer);
+  let remaining = KARAOKE_ANNOUNCE_SECONDS;
+  karaokeAnnounceCount.textContent = `Empieza en ${remaining}s`;
+  announceTimer = setInterval(() => {
+    remaining -= 1;
+    if (remaining > 0) {
+      karaokeAnnounceCount.textContent = `Empieza en ${remaining}s`;
+    } else {
+      clearInterval(announceTimer);
+      karaokeAnnounceEl.classList.add('hidden');
+      onDone?.();
+    }
+  }, 1000);
+}
+
+// --- Karaoke mic monitor: play a local mic through the speakers while songs
+// play, ducking the music. Config comes from Settings (/api/settings). The
+// stream stays open for the whole Karaoke session (not per song) so a
+// Bluetooth mic doesn't re-handshake between turns. ---
+let micMonitorConfig = { enabled: false, deviceId: null, musicVolume: 70 };
+let micMonitor = null; // { stream, ctx, source }
+let karaokeProgressTimer = null; // broadcasts playback position to phones
+
+fetch('/api/settings')
+  .then((r) => r.json())
+  .then((s) => { if (s.micMonitor) micMonitorConfig = s.micMonitor; })
+  .catch(() => {});
+
+async function startMicMonitor() {
+  if (micMonitor || !micMonitorConfig.enabled) return;
+  micMonitor = { pending: true }; // guard against a double-start race
+  try {
+    // Raw mic (no AGC/NS/echo processing) so singing sounds natural.
+    const audio = micMonitorConfig.deviceId
+      ? { deviceId: { exact: micMonitorConfig.deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      : { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    const stream = await navigator.mediaDevices.getUserMedia({ audio });
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    try { await ctx.resume(); } catch {}
+    const source = ctx.createMediaStreamSource(stream);
+    source.connect(ctx.destination);
+    micMonitor = { stream, ctx, source };
+  } catch (err) {
+    console.warn('mic monitor failed', err);
+    micMonitor = null;
+  }
+}
+
+function stopMicMonitor() {
+  if (!micMonitor) return;
+  const m = micMonitor;
+  micMonitor = null;
+  try { m.source?.disconnect(); } catch {}
+  try { m.stream?.getTracks().forEach((t) => t.stop()); } catch {}
+  try { m.ctx?.close(); } catch {}
+}
+
 let lastAutoPlayedSongId = null;
+let lastTurnKey = null;
 let nowPlayingUserId = null;
 
 function handleNowPlaying(nowPlaying) {
   if (!nowPlaying || !nowPlaying.songId) return;
-  if (nowPlaying.songId === lastAutoPlayedSongId) return;
+  // Dedupe by turn (user + song), not just song, so two people can queue the
+  // same song back to back and both play.
+  const turnKey = `${nowPlaying.userId ?? ''}:${nowPlaying.songId}`;
+  if (turnKey === lastTurnKey) return;
+  lastTurnKey = turnKey;
   lastAutoPlayedSongId = nowPlaying.songId;
   nowPlayingUserId = nowPlaying.userId ?? null;
   const singer = latestUsers.find((u) => u.id === nowPlayingUserId);
-  currentTurnNickname = singer?.nickname ?? null;
+  currentTurnNickname = singer?.nickname ?? nowPlaying.nickname ?? null;
   hideResults(); // a new turn supersedes any lingering results screen
-  openSong(nowPlaying.songId, { withCountdown: true });
+
+  // Karaoke: no scoring, no mic, no countdown. Announce the participant, then
+  // just play the song.
+  if (currentMode === 'karaoke') {
+    showKaraokeAnnounce(currentTurnNickname, nowPlaying.songTitle, () => {
+      openSong(nowPlaying.songId, { withCountdown: false, duetMode: nowPlaying.duetMode });
+    });
+    return;
+  }
+
+  // Physical-mic singer: don't auto-play. Show the prep screen so the
+  // operator picks and tests the mic; starting the turn (countdown + song)
+  // happens from there. Phone singers are unaffected.
+  if (window.localMics?.isMicSinger(nowPlayingUserId)) {
+    showMicPrep(nowPlaying);
+    return;
+  }
+  openSong(nowPlaying.songId, { withCountdown: true, duetMode: nowPlaying.duetMode });
 }
+
+// --- Pre-turn prep screen for physical-mic singers ---
+const micPrepOverlay = document.getElementById('mic-prep-overlay');
+const micPrepTitle = document.getElementById('mic-prep-title');
+const micPrepSong = document.getElementById('mic-prep-song');
+const micPrepMics = document.getElementById('mic-prep-mics');
+const micPrepMeterFill = document.getElementById('mic-prep-meter-fill');
+const micPrepStart = document.getElementById('mic-prep-start');
+const micPrepCancel = document.getElementById('mic-prep-cancel');
+let micPrepUserId = null;
+let micPrepDeviceId = null;
+
+function selectPrepMic(deviceId) {
+  micPrepDeviceId = deviceId;
+  micPrepMics.querySelectorAll('button').forEach((b) => {
+    b.classList.toggle('selected', b.dataset.deviceId === deviceId);
+  });
+  window.localMics.primeAndMeter(micPrepUserId, deviceId, (level) => {
+    micPrepMeterFill.style.width = `${Math.round(level * 100)}%`;
+  }).catch((err) => {
+    micPrepSong.textContent = `No se pudo abrir el micrófono: ${err.message}`;
+  });
+}
+
+function showMicPrep(nowPlaying) {
+  micPrepUserId = nowPlaying.userId;
+  const name = window.localMics.singerName(micPrepUserId) || currentTurnNickname || '';
+  micPrepTitle.textContent = name ? `Prepará el micrófono de ${name}` : 'Prepará el micrófono';
+  micPrepSong.textContent = nowPlaying.songTitle || '';
+
+  const mics = window.localMics.enabledMics();
+  micPrepMics.innerHTML = mics
+    .map((m) => `<button type="button" data-device-id="${escapeHtml(m.deviceId)}">${escapeHtml(m.label || 'Micrófono')}</button>`)
+    .join('');
+  micPrepMics.querySelectorAll('button').forEach((b) => {
+    b.addEventListener('click', () => selectPrepMic(b.dataset.deviceId));
+  });
+
+  micPrepMeterFill.style.width = '0%';
+  micPrepOverlay.classList.remove('hidden');
+  if (mics.length > 0) selectPrepMic(mics[0].deviceId); // preview the first mic
+}
+
+function hideMicPrep() {
+  micPrepOverlay.classList.add('hidden');
+}
+
+micPrepStart.addEventListener('click', () => {
+  if (!micPrepDeviceId) return;
+  window.localMics.startStreaming(micPrepUserId);
+  hideMicPrep();
+  openSong(lastAutoPlayedSongId, { withCountdown: true });
+});
+
+micPrepCancel.addEventListener('click', () => {
+  window.localMics.stopCapture();
+  hideMicPrep();
+  // Abandon the called turn so the singer isn't stuck; operator can re-add.
+  if (micPrepUserId && roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'endTurn', userId: micPrepUserId }));
+  }
+  lastAutoPlayedSongId = null;
+  micPrepUserId = null;
+});
 
 function renderLowLatencyToggle(enabled) {
   lowLatencyMode = enabled;
@@ -671,6 +1001,7 @@ function connectRoom() {
   roomWs.onmessage = (evt) => {
     const data = JSON.parse(evt.data);
     if (data.type === 'roomState') {
+      applyMode(data.mode);
       latestUsers = data.users;
       latestQueue = data.queue;
       renderUsers(data.users);
@@ -686,6 +1017,11 @@ function connectRoom() {
           const singer = latestUsers.find((u) => u.id === pendingResultsUserId);
           if (singer?.state === 'scored' && singer.lastScore) {
             setResultsScore(singer.lastScore);
+            pendingResultsUserId = null;
+          } else if (!singer || singer.state === 'connected' || singer.state === 'guest') {
+            // The turn ended without a score (mic never streamed, singer
+            // dropped, etc.) — don't leave "Calculando puntaje..." stuck.
+            resultsScore.textContent = 'No se registró puntaje para este turno.';
             pendingResultsUserId = null;
           }
         }
@@ -718,6 +1054,44 @@ themeToggleBtn.textContent = themeIcon(document.documentElement.dataset.theme ==
 themeToggleBtn.addEventListener('click', () => {
   themeToggleBtn.textContent = themeIcon(toggleTheme());
 });
+
+// --- Modo de sesión (Karaoke / UltraStar) ---
+// The mode is global for the Sala session: the landing sets it via /ws/room,
+// the server echoes it back in roomState, and applyMode() reflects it here.
+const modeLanding = document.getElementById('mode-landing');
+const modeChip = document.getElementById('mode-chip');
+let currentMode = null;
+
+function applyMode(mode) {
+  const next = mode === 'karaoke' || mode === 'ultrastar' ? mode : null;
+  currentMode = next;
+  const advanceBtn = document.getElementById('advance-btn');
+  if (next) {
+    document.documentElement.dataset.mode = next;
+    modeLanding.classList.add('hidden');
+    modeChip.classList.remove('hidden');
+    modeChip.textContent = next === 'karaoke' ? '🎤 Karaoke ⇄' : '🏆 UltraStar ⇄';
+    advanceBtn.textContent = next === 'karaoke' ? '▶ Reproducir siguiente' : '▶ Avanzar rotación';
+  } else {
+    delete document.documentElement.dataset.mode;
+    modeLanding.classList.remove('hidden');
+    modeChip.classList.add('hidden');
+  }
+  if (next !== 'karaoke') stopMicMonitor(); // free the mic when leaving Karaoke
+}
+
+function sendMode(mode) {
+  if (roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'setMode', mode }));
+  }
+}
+
+modeLanding.querySelectorAll('.mode-card').forEach((card) => {
+  card.addEventListener('click', () => sendMode(card.dataset.mode));
+});
+modeChip.addEventListener('click', () => sendMode(null)); // volver al landing
+
+applyMode(null); // mostrar el landing hasta que el primer roomState diga el modo
 
 loadQr();
 connectRoom();

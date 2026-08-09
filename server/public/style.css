@@ -551,7 +551,9 @@ html, body {
   flex: 0 0 auto;
 }
 
-.join-wrap input, .join-wrap select, .join-wrap button {
+/* The round theme-toggle lives in the header — exclude it, or this full-width
+   rule stretches it into a big rectangle and breaks the header layout. */
+.join-wrap input, .join-wrap select, .join-wrap button:not(.theme-toggle-btn) {
   width: 100%;
   font-size: 16px;
   padding: 12px 14px;
@@ -927,3 +929,450 @@ html, body {
   font-size: 12px;
   cursor: pointer;
 }
+
+/* Physical-mic panel in the Sala (localmics.js) */
+.local-mics-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.local-mic {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.local-mic-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.local-mic-status {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.local-mic-meter {
+  margin-top: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--page);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.local-mic-meter-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 60ms linear;
+}
+
+.local-mic-search {
+  margin-top: 8px;
+}
+
+.local-mic-search .mic-song-input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--page);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.mic-song-results {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.mic-song-results li {
+  border: none;
+  padding: 0;
+}
+
+.mic-song-results button {
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mic-song-results button:hover {
+  background: rgba(var(--accent-rgb), 0.15);
+}
+
+.local-mic-song {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#add-mic-singer-btn {
+  margin-top: 10px;
+  width: 100%;
+}
+
+/* Add-singer modal + pre-turn prep screen */
+.mic-modal-overlay,
+.mic-prep-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 20px;
+}
+
+.mic-modal,
+.mic-prep-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px;
+  width: min(520px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  color: var(--text);
+}
+
+.mic-modal h3,
+.mic-prep-card h2 {
+  margin: 0 0 14px;
+}
+
+.mic-modal-label {
+  display: block;
+  margin: 12px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.mic-modal input[type="text"] {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--page);
+  color: var(--text);
+  font-size: 15px;
+}
+
+.mic-modal-selected {
+  margin-top: 10px;
+  font-size: 14px;
+  color: var(--accent);
+  min-height: 20px;
+}
+
+.mic-modal-actions,
+.mic-prep-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.mic-prep-song {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.mic-prep-hint {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 14px;
+}
+
+.mic-prep-mics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.mic-prep-mics button {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  background: var(--page);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.mic-prep-mics button.selected {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
+}
+
+.mic-prep-meter {
+  height: 16px;
+  border-radius: 8px;
+  background: var(--page);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.mic-prep-meter-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 60ms linear;
+}
+
+/* Per-mic enable checkboxes in Settings */
+.mic-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.mic-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ---- Selector de modo de sesión (landing) ---- */
+.mode-landing {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(circle at 50% 25%, var(--surface), var(--page));
+}
+.mode-landing.hidden { display: none; }
+.mode-landing-inner { width: min(920px, 100%); text-align: center; }
+.mode-landing-title { font-size: clamp(2rem, 6vw, 3.4rem); margin: 0 0 4px; }
+.mode-landing-sub { color: var(--muted); font-size: clamp(1rem, 2.5vw, 1.25rem); margin: 0 0 32px; }
+.mode-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 720px) { .mode-cards { grid-template-columns: 1fr; } }
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 24px;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 20px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: center;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.mode-card:hover,
+.mode-card:focus-visible {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+  outline: none;
+}
+.mode-card-emoji { font-size: 3rem; line-height: 1; }
+.mode-card-name { font-size: 1.6rem; font-weight: 700; }
+.mode-card-desc { color: var(--muted); font-size: 0.98rem; line-height: 1.45; }
+
+/* ---- Chip de modo en la barra superior ---- */
+.mode-chip {
+  background: var(--field);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mode-chip:hover { border-color: var(--accent); }
+.mode-chip.hidden { display: none; }
+
+/* ---- Diferencias por modo ---- */
+/* Karaoke no puntúa: ocultamos ranking, baja latencia, el panel de micrófonos
+   físicos (parte del flujo de puntuación; el micro en Karaoke lo maneja el
+   monitor con ducking, Fase 2) y "Conectados" (la cola ya lista a los
+   participantes con su canción). */
+:root[data-mode="karaoke"] #ranking-box,
+:root[data-mode="karaoke"] #local-mics,
+:root[data-mode="karaoke"] #connected-box,
+:root[data-mode="karaoke"] #low-latency-toggle { display: none; }
+
+/* Karaoke en el celular: sin micro ni puntaje — solo anotás la canción y
+   cantás mirando la Sala. Ocultamos puntaje, botones de micro, ecualizador,
+   la letra (no se puede sincronizar sin las tramas de puntaje) y el botón de
+   avanzar la cola (eso lo maneja la Sala). */
+:root[data-mode="karaoke"] #step-sing .score-box,
+:root[data-mode="karaoke"] #step-sing #start-mic-btn,
+:root[data-mode="karaoke"] #step-sing #stop-mic-btn,
+:root[data-mode="karaoke"] #step-sing #equalizer-box,
+:root[data-mode="karaoke"] #advance-row { display: none !important; }
+
+/* Botón para cambiar Dúo/Solista desde el celular (mientras estás en la cola) */
+.phone-duet-toggle {
+  background: rgba(var(--accent-rgb), 0.15) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  font-weight: 700;
+}
+.phone-duet-toggle.hidden { display: none; }
+
+/* ---- Karaoke: cartel "Ahora canta X" antes de cada turno ---- */
+.karaoke-announce {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 24px;
+  background: radial-gradient(circle at 50% 40%, rgba(236, 72, 153, 0.25), rgba(11, 12, 20, 0.92));
+  animation: karaoke-pop 0.3s ease;
+}
+.karaoke-announce.hidden { display: none; }
+.karaoke-announce-emoji { font-size: clamp(3rem, 10vw, 6rem); line-height: 1; }
+.karaoke-announce-label { color: var(--muted); font-size: clamp(1rem, 3vw, 1.6rem); text-transform: uppercase; letter-spacing: 0.15em; }
+.karaoke-announce-name { color: #fff; font-size: clamp(2.2rem, 8vw, 5rem); font-weight: 800; }
+.karaoke-announce-song { color: var(--accent2); font-size: clamp(1.2rem, 4vw, 2.2rem); font-weight: 600; }
+.karaoke-announce-count { color: var(--muted); font-size: clamp(1rem, 3vw, 1.6rem); margin-top: 18px; letter-spacing: 0.03em; }
+@keyframes karaoke-pop {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Canción elegida dentro del modal de nombre (Karaoke) */
+.karaoke-modal-song {
+  color: var(--accent2);
+  font-weight: 700;
+  margin: 4px 0 8px;
+}
+
+/* ---- Duetos: color de letra por voz + leyenda ---- */
+:root {
+  --voice1: #ff4fa3; /* voz 1 — rosa */
+  --voice2: #38bdf8; /* voz 2 — celeste */
+  --voice3: #a3e635; /* ambos — lima */
+}
+/* Solo aplica cuando la canción es dueto (data-duet); las canciones normales
+   conservan su color de siempre. */
+:root[data-duet] .lyrics-current[data-player="1"],
+:root[data-duet] .lyrics-prev[data-player="1"],
+:root[data-duet] .lyrics-next[data-player="1"] { color: var(--voice1); }
+:root[data-duet] .lyrics-current[data-player="2"],
+:root[data-duet] .lyrics-prev[data-player="2"],
+:root[data-duet] .lyrics-next[data-player="2"] { color: var(--voice2); }
+:root[data-duet] .lyrics-current[data-player="3"],
+:root[data-duet] .lyrics-prev[data-player="3"],
+:root[data-duet] .lyrics-next[data-player="3"] { color: var(--voice3); }
+
+.duet-legend {
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+  margin-bottom: 12px;
+  font-size: 18px;
+  font-weight: 600;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+.duet-legend.hidden { display: none; }
+.duet-voice { display: inline-flex; align-items: center; gap: 8px; }
+.duet-voice[data-player="1"] { color: var(--voice1); }
+.duet-voice[data-player="2"] { color: var(--voice2); }
+.duet-voice[data-player="3"] { color: var(--voice3); }
+.duet-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* Toggle Dúo/Solista en el reproductor (junto al botón de pantalla completa) */
+.duet-toggle {
+  position: absolute;
+  top: 20px;
+  right: 66px;
+  z-index: 10;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(11, 12, 20, 0.6);
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.duet-toggle.hidden { display: none; }
+
+/* Overlay para elegir Dúo/Solista al seleccionar un dueto del catálogo */
+.duet-choose-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 20px;
+}
+.duet-choose-overlay.hidden { display: none; }
+.duet-choose-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  width: min(460px, 100%);
+  text-align: center;
+  color: var(--text);
+}
+.duet-choose-card h2 { margin: 0 0 8px; }
+.duet-choose-song { color: var(--accent2); font-weight: 700; margin: 0 0 16px; }
+.duet-choose-hint { color: var(--muted); margin: 0 0 20px; }
+.duet-choose-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.duet-choose-actions button {
+  padding: 14px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--field);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+}
+.duet-choose-actions button.primary-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.duet-choose-actions button:hover { border-color: var(--accent); }

@@ -16,6 +16,27 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
+  <!-- Landing shown until the pantalla principal picks a session mode. The
+       chosen mode is global for the Sala session and inherited by phones. -->
+  <div id="mode-landing" class="mode-landing">
+    <div class="mode-landing-inner">
+      <h1 class="mode-landing-title">🎤 PitchParty</h1>
+      <p class="mode-landing-sub">Elegí el modo de la sesión</p>
+      <div class="mode-cards">
+        <button class="mode-card" data-mode="karaoke" type="button">
+          <span class="mode-card-emoji">🎤</span>
+          <span class="mode-card-name">Karaoke</span>
+          <span class="mode-card-desc">Modo que funciona solo como sistema de karaoke: los participantes se anotan junto con su canción seleccionada. Sin puntaje, solo cantar.</span>
+        </button>
+        <button class="mode-card" data-mode="ultrastar" type="button">
+          <span class="mode-card-emoji">🏆</span>
+          <span class="mode-card-name">UltraStar</span>
+          <span class="mode-card-desc">Modo de competencia donde tu canto es puntuado y se premia al que mejor canta. Cada participante se anota con su canción seleccionada.</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div id="insecure-banner" class="insecure-banner hidden">
     ⚠️ Estás viendo la Sala sin HTTPS — los celulares NO van a poder usar el micrófono desde acá.
     Abrí esta misma página como <strong id="https-hint"></strong> en este equipo y en cada celular.
@@ -33,6 +54,7 @@
       <span id="network-dot" class="network-dot"></span>
       <span id="network-label">Red: sin datos</span>
     </div>
+    <button id="mode-chip" class="mode-chip hidden" title="Cambiar modo de la sesión" type="button"></button>
     <button id="low-latency-toggle" class="low-latency-btn">Modo baja latencia: OFF</button>
     <button id="theme-toggle" class="theme-toggle-btn" title="Cambiar tema" type="button">🌙</button>
     <a href="/settings.html" style="color:var(--muted)">⚙️ Configuración</a>
@@ -51,6 +73,7 @@
         <audio id="audio" preload="auto"></audio>
 
         <button id="back-btn" class="back-btn">← Volver al catálogo</button>
+        <button id="duet-toggle" class="duet-toggle hidden" type="button" title="Alternar dúo / solista"></button>
         <button id="fullscreen-btn" class="fullscreen-btn" title="Pantalla completa">⛶</button>
 
         <div class="player-title-bar">
@@ -58,6 +81,7 @@
         </div>
 
         <div class="player-overlay">
+          <div id="duet-legend" class="duet-legend hidden"></div>
           <div class="lyrics">
             <div id="lyrics-prev" class="lyrics-line lyrics-prev"></div>
             <div id="lyrics-current" class="lyrics-line lyrics-current"></div>
@@ -71,6 +95,15 @@
 
         <div id="countdown-overlay" class="countdown-overlay hidden">
           <span id="countdown-number" class="countdown-number"></span>
+        </div>
+
+        <!-- Karaoke: anuncia al próximo participante antes de reproducir. -->
+        <div id="karaoke-announce" class="karaoke-announce hidden">
+          <div class="karaoke-announce-emoji">🎤</div>
+          <div class="karaoke-announce-label">Ahora canta</div>
+          <div id="karaoke-announce-name" class="karaoke-announce-name"></div>
+          <div id="karaoke-announce-song" class="karaoke-announce-song"></div>
+          <div id="karaoke-announce-count" class="karaoke-announce-count"></div>
         </div>
 
         <div id="results-overlay" class="results-overlay hidden">
@@ -90,7 +123,7 @@
         <img id="qr-img" alt="QR para unirse a la sala" />
         <div class="qr-caption">Escaneá para unirte desde el celular</div>
       </div>
-      <div class="users-box">
+      <div class="users-box" id="connected-box">
         <h3>Conectados (<span id="users-count">0</span>)</h3>
         <ul id="users-list"></ul>
       </div>
@@ -99,7 +132,12 @@
         <ol id="queue-list"></ol>
         <button id="advance-btn">▶ Avanzar rotación</button>
       </div>
-      <div class="users-box">
+      <div class="users-box hidden" id="local-mics">
+        <h3>🎙️ Micrófonos físicos</h3>
+        <ul id="local-mics-list" class="local-mics-list"></ul>
+        <button id="add-mic-singer-btn" type="button">➕ Cantante con micrófono</button>
+      </div>
+      <div class="users-box" id="ranking-box">
         <h3>Ranking de la sesión</h3>
         <ol id="ranking-list"></ol>
       </div>
@@ -107,6 +145,37 @@
     </div>
   </div>
 
+  <!-- Prep screen shown before a physical-mic singer's turn: pick + test the
+       mic, then start (which runs the countdown and the song). -->
+  <div id="mic-prep-overlay" class="mic-prep-overlay hidden">
+    <div class="mic-prep-card">
+      <h2 id="mic-prep-title">Prepará el micrófono</h2>
+      <div id="mic-prep-song" class="mic-prep-song"></div>
+      <p class="mic-prep-hint">Elegí el micrófono y probalo (hablá/cantá y mirá la barra). Cuando estén listos, dale Empezar.</p>
+      <div id="mic-prep-mics" class="mic-prep-mics"></div>
+      <div class="mic-prep-meter"><div id="mic-prep-meter-fill" class="mic-prep-meter-fill"></div></div>
+      <div class="mic-prep-actions">
+        <button id="mic-prep-cancel" type="button">Cancelar turno</button>
+        <button id="mic-prep-start" type="button" class="primary-btn">▶ Empezar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shown when a duet song is picked from the catalog: play it as a duo
+       (two colored voices) or solo (one person sings everything). -->
+  <div id="duet-choose-overlay" class="duet-choose-overlay hidden">
+    <div class="duet-choose-card">
+      <h2>Esta canción es un dúo 🎭</h2>
+      <p id="duet-choose-song" class="duet-choose-song"></p>
+      <p class="duet-choose-hint">¿Cómo la van a cantar?</p>
+      <div class="duet-choose-actions">
+        <button id="duet-choose-duo" type="button" class="primary-btn">🎭 En dúo (2 voces)</button>
+        <button id="duet-choose-solo" type="button">🙂 Solista (canto todo)</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/app.js" type="module"></script>
+  <script src="/localmics.js" type="module"></script>
 </body>
 </html>

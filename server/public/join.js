@@ -38,6 +38,7 @@ const phoneCountdownEl = document.getElementById('phone-countdown');
 const phoneCountdownNumberEl = document.getElementById('phone-countdown-number');
 const phoneNextUpEl = document.getElementById('phone-next-up');
 const scorePctEl = document.getElementById('score-pct');
+const phoneDuetToggle = document.getElementById('phone-duet-toggle');
 
 let role = null;
 let userId = null;
@@ -53,6 +54,15 @@ let silentGain = null;
 let mediaStream = null;
 let singWs = null;
 let activeLines = [];
+
+// Duet choice for the selected song (only meaningful when the song is a duet).
+let selectedIsDuet = false;
+let selectedDuetMode = 'duo';
+// Karaoke lyric sync: anchor { positionMs, at } from the Sala's broadcast; a
+// rAF loop interpolates between broadcasts so the phone shows synced lyrics.
+let karaokeLyricsAnchor = null;
+let karaokeLyricsRaf = null;
+let karaokeSingingNow = false; // true only while it's actually our turn
 
 // Latest queue from roomState, so the end-of-turn screen can show who's up
 // next.
@@ -266,6 +276,8 @@ function handleRoomMessage(evt) {
     roomWs.send(JSON.stringify({ type: 'reportLatency', ms: Math.round(rtt) }));
   } else if (data.type === 'roomState') {
     onRoomState(data);
+  } else if (data.type === 'karaokeProgress') {
+    onKaraokeProgress(data);
   }
 }
 
@@ -394,18 +406,100 @@ async function primeMicPermission() {
   }
 }
 
-function selectSong(songId) {
+async function selectSong(songId) {
   selectedSongId = songId;
   const song = allSongs.find((s) => s.id === songId);
   selectedSongTitle = song ? `${song.artist} — ${song.title}` : null;
-  roomWs.send(JSON.stringify({ type: 'chooseSong', songId }));
+
+  // If it's a duet, let the singer pick duo/solo before queueing.
+  selectedIsDuet = false;
+  selectedDuetMode = 'duo';
+  try {
+    const detail = await (await fetch(`/api/songs/${songId}`)).json();
+    selectedIsDuet = Boolean(detail.isDuet);
+  } catch {}
+  if (selectedIsDuet) {
+    selectedDuetMode = await askPhoneDuetMode(selectedSongTitle);
+  }
+
+  roomWs.send(JSON.stringify({ type: 'chooseSong', songId, duetMode: selectedIsDuet ? selectedDuetMode : null }));
   stepSong.classList.add('hidden');
   stepSing.classList.remove('hidden');
-  singStatus.textContent = 'Estás en la cola. Preparando el micrófono...';
+  updateDuetToggleUI('queued');
 
   unlockAlertAudio();
-  primeMicPermission();
   requestWakeLock();
+
+  if (currentMode === 'karaoke') {
+    // No mic in Karaoke — the lyrics show here on your turn, synced to the Sala.
+    singStatus.textContent = 'Estás en la cola 🎤 En tu turno vas a ver la letra acá.';
+  } else {
+    singStatus.textContent = 'Estás en la cola. Preparando el micrófono...';
+    primeMicPermission();
+  }
+}
+
+// Small blocking chooser (duet only): resolves to 'duo' or 'solo'.
+function askPhoneDuetMode(title) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'mic-modal-overlay';
+    overlay.innerHTML = `
+      <div class="mic-modal">
+        <h3>Esta canción es un dúo 🎭</h3>
+        <div class="karaoke-modal-song">${escapeHtml(title || '')}</div>
+        <p class="mic-modal-label">¿Cómo la vas a cantar?</p>
+        <div class="duet-choose-actions">
+          <button type="button" id="pd-duo" class="primary-btn">🎭 En dúo (2 voces)</button>
+          <button type="button" id="pd-solo">🙂 Solista (canto todo)</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const done = (mode) => { overlay.remove(); resolve(mode); };
+    overlay.querySelector('#pd-duo').addEventListener('click', () => done('duo'));
+    overlay.querySelector('#pd-solo').addEventListener('click', () => done('solo'));
+  });
+}
+
+// Shows the "change duo/solo" button while queued for a duet.
+function updateDuetToggleUI(state) {
+  const show = selectedIsDuet && (state === undefined || state === 'queued');
+  if (show) {
+    phoneDuetToggle.textContent = selectedDuetMode === 'duo' ? '🎭 Dúo — tocá para cambiar' : '🙂 Solista — tocá para cambiar';
+    phoneDuetToggle.classList.remove('hidden');
+  } else {
+    phoneDuetToggle.classList.add('hidden');
+  }
+}
+
+phoneDuetToggle.addEventListener('click', () => {
+  if (!selectedIsDuet) return;
+  selectedDuetMode = selectedDuetMode === 'duo' ? 'solo' : 'duo';
+  updateDuetToggleUI('queued');
+  if (roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'setDuetMode', duetMode: selectedDuetMode }));
+  }
+});
+
+// --- Karaoke lyric sync: drive the lyric preview from the Sala's broadcast
+// position, interpolating between updates for smoothness. ---
+function onKaraokeProgress(data) {
+  if (!karaokeSingingNow || data.songId !== selectedSongId) return;
+  karaokeLyricsAnchor = { positionMs: data.positionMs, at: performance.now() };
+  lyricsPreviewEl.classList.remove('hidden');
+  if (!karaokeLyricsRaf) {
+    const loop = () => {
+      if (!karaokeLyricsAnchor) { karaokeLyricsRaf = null; return; }
+      updateLyricsPreview(karaokeLyricsAnchor.positionMs + (performance.now() - karaokeLyricsAnchor.at));
+      karaokeLyricsRaf = requestAnimationFrame(loop);
+    };
+    karaokeLyricsRaf = requestAnimationFrame(loop);
+  }
+}
+
+function stopKaraokeLyrics() {
+  karaokeLyricsAnchor = null;
+  if (karaokeLyricsRaf) { cancelAnimationFrame(karaokeLyricsRaf); karaokeLyricsRaf = null; }
 }
 
 let hasStartedThisTurn = false;
@@ -443,13 +537,27 @@ function routeToStep(self) {
     stepGuest.classList.add('hidden');
     stepSing.classList.add('hidden');
     stepSong.classList.remove('hidden');
+    // Between turns: tear down the Karaoke lyric sync so a stale line doesn't
+    // linger, and clear the duet choice for the next pick.
+    stopKaraokeLyrics();
+    lyricsPreviewEl.classList.add('hidden');
+    activeLines = [];
+    selectedIsDuet = false;
+    phoneDuetToggle.classList.add('hidden');
     if (allSongs.length === 0) loadAllSongs();
   }
 }
 
 let lastRoutedState = null;
+let currentMode = null;
 
 function onRoomState(data) {
+  // Inherit the session mode so the phone can adapt: in Karaoke there's no
+  // phone mic and no scoring — you just queue a song and sing looking at the
+  // Sala. Set even before we have a user record so the UI can react early.
+  currentMode = data.mode || null;
+  document.documentElement.dataset.mode = data.mode || '';
+
   if (!userId) return;
 
   const self = data.users.find((u) => u.id === userId);
@@ -471,12 +579,20 @@ function onRoomState(data) {
     lastRoutedState = self.state;
   }
 
+  updateDuetToggleUI(self.state);
+  karaokeSingingNow = currentMode === 'karaoke' && (self.state === 'called' || self.state === 'singing');
+
   if (self.state === 'called' && previousSelfState !== 'called') {
     playCallAlert();
+    if (currentMode === 'karaoke' && selectedSongId) loadLyricsFor(selectedSongId);
   }
   previousSelfState = self.state;
 
-  if (self.state === 'called' && !hasStartedThisTurn && !startingMic && !turnCountdownRunning) {
+  if (self.state === 'called' && currentMode === 'karaoke') {
+    // Karaoke: no phone mic, no scoring — show the lyrics synced to the Sala.
+    singStatus.textContent = '¡Es tu turno! 🎤 Seguí la letra.';
+    lyricsPreviewEl.classList.remove('hidden');
+  } else if (self.state === 'called' && !hasStartedThisTurn && !startingMic && !turnCountdownRunning) {
     if (micPermissionState === 'denied') {
       // Priming failed (permission blocked) — fall back to the manual
       // tap, which lets the browser retry the prompt from a fresh gesture.
