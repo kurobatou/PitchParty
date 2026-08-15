@@ -6,6 +6,9 @@ server/data/
 .env
 .claude/settings.local.json
 scripts/
+# ...pero server/scripts/ es código del repo (ej. el syntax-check del CI), no reportes locales.
+!server/scripts/
+!server/scripts/**
 
 # Reportes y manifiestos generados por los scripts locales
 *-report.txt
