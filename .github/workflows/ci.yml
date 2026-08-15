@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['18.x', '20.x']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      # better-sqlite3 resolves a prebuilt binary on Ubuntu, so no compiler
+      # toolchain is needed here. The unit tests don't import it anyway.
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Syntax check (all JS, incl. browser files)
+        working-directory: server
+        run: npm run check
+
+      - name: Lint
+        working-directory: server
+        run: npm run lint
+
+      - name: Tests
+        working-directory: server
+        run: npm test

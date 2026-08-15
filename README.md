@@ -80,9 +80,28 @@ si está a menos de 30 días de vencer.
 server/               Servidor Node (Fastify): motor de puntuación, indexador, Sala/join/sing, config
 server/data/          DB SQLite, certificados (autofirmado y Let's Encrypt) y ajustes — no versionado, se crea solo
 server/public/        Cliente web: Sala (index), unirse desde el celular (join), configuración (settings)
+server/test/          Tests unitarios de la lógica pura (node --test)
+docs/sdd/             Especificación técnica del proyecto
 songs/                Biblioteca de canciones UltraStar (no versionada)
 config.json           Carpeta(s) de biblioteca por defecto (editable después desde la UI)
+.github/workflows/    CI (GitHub Actions): check + lint + tests en cada PR
 ```
+
+## Desarrollo / Tests
+
+Hay una red de seguridad liviana, sin dependencias nuevas de runtime ni build step. Desde `server/`:
+
+```bash
+cd server
+npm ci
+npm run ci     # corre los tres de abajo en orden
+```
+
+- `npm test` — tests unitarios de la lógica pura (parser USDX, scoring, detección de tono, sala/cola/ranking) con el runner nativo de Node (`node --test`).
+- `npm run check` — chequeo de sintaxis (`node --check`) de **todo** el JS, incluido el del navegador (`app.js`, `join.js`, ...) que no se puede unit-testear sin un navegador real.
+- `npm run lint` — ESLint (config flat) sobre server + frontend.
+
+El mismo `check` + `lint` + `test` corre solo en cada Pull Request y en cada push a `main` vía GitHub Actions (ver `.github/workflows/ci.yml`).
 
 ## Estado
 
