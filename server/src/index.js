@@ -364,6 +364,17 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
       return;
     }
 
+    // A guest decides mid-session they want to sing after all — switch their
+    // role without forcing them to wait out the saved session and rejoin
+    // from scratch.
+    if (msg.type === 'setRole') {
+      const role = msg.role === 'singer' || msg.role === 'guest' ? msg.role : null;
+      if (!role) return;
+      room.update(userId, { role });
+      room.broadcastState();
+      return;
+    }
+
     // Phone changes its duo/solo choice for a duet while queued.
     if (msg.type === 'setDuetMode') {
       const duetMode = msg.duetMode === 'duo' || msg.duetMode === 'solo' ? msg.duetMode : null;
@@ -461,6 +472,14 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
     if (!userId) return;
     const user = room.users.get(userId);
     if (!user) return;
+
+    // A stale socket can report its close after the user already reconnected
+    // with a new one (Room.reconnect swaps in the new socket) — the old
+    // TCP connection's close just hasn't been noticed yet. Without this
+    // check, that late close would overwrite the state of a user who's
+    // actually still connected and eventually remove them (and their queued
+    // song) anyway.
+    if (user.socket !== socket) return;
 
     // The pantalla principal doesn't hold a queue position worth saving —
     // it just reconnects as a fresh "Pantalla" entry on its own (app.js) —

@@ -12,6 +12,7 @@ const stepJoin = document.getElementById('step-join');
 const stepSong = document.getElementById('step-song');
 const stepSing = document.getElementById('step-sing');
 const stepGuest = document.getElementById('step-guest');
+const becomeSingerBtn = document.getElementById('become-singer-btn');
 
 const songSearchEl = document.getElementById('song-search');
 const songResultsEl = document.getElementById('song-results');
@@ -209,6 +210,17 @@ roleGuestBtn.addEventListener('click', () => {
   roleGuestBtn.classList.add('selected');
   roleSingerBtn.classList.remove('selected');
   joinBtn.disabled = false;
+});
+
+// A guest who changes their mind mid-session — switch roles in place instead
+// of making them wait out the saved session to rejoin as a singer.
+becomeSingerBtn.addEventListener('click', () => {
+  role = 'singer';
+  saveSession();
+  if (roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'setRole', role: 'singer' }));
+  }
+  onJoined();
 });
 
 // Persisted so a dropped connection (screen lock, backgrounded tab, brief
