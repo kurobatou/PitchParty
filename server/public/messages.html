@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PitchParty — Mensajes</title>
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem('pitchparty-theme') === 'light') {
+          document.documentElement.dataset.theme = 'light';
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>📨 Mensajes</h1>
+    <a href="/" style="color:var(--muted)">← Volver a la Sala</a>
+  </header>
+
+  <main class="settings-page">
+    <section class="settings-card">
+      <h2>Reportes y pedidos del público</h2>
+      <p class="settings-hint">
+        Bugs de interfaz, canciones con mala sincronización, mensajes generales y pedidos de canción
+        enviados desde los celulares. Los pendientes aparecen primero.
+      </p>
+
+      <div class="settings-row">
+        <button id="refresh-btn" type="button">🔄 Actualizar</button>
+        <span id="messages-status" class="settings-status"></span>
+      </div>
+
+      <ul id="message-list" class="message-list"></ul>
+    </section>
+  </main>
+
+  <script type="module" src="/messages.js"></script>
+</body>
+</html>

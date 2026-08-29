@@ -29,6 +29,19 @@ export function openDb() {
       video_path TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      text TEXT,
+      song_id INTEGER,
+      song_title TEXT,
+      requested_title TEXT,
+      requested_artist TEXT,
+      nickname TEXT,
+      resolved INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   return db;
@@ -78,4 +91,37 @@ export function listSongs(db) {
 
 export function getSongById(db, id) {
   return db.prepare('SELECT * FROM songs WHERE id = ?').get(id);
+}
+
+// Feedback submitted from a phone (bug report, out-of-sync song, general
+// message, or a song/artist request) — see server/src/messages.js for the
+// payload validation and the four known `type` values.
+export function insertMessage(db, { type, text, songId, songTitle, requestedTitle, requestedArtist, nickname }) {
+  const result = db.prepare(`
+    INSERT INTO messages (type, text, song_id, song_title, requested_title, requested_artist, nickname)
+    VALUES (@type, @text, @songId, @songTitle, @requestedTitle, @requestedArtist, @nickname)
+  `).run({
+    type,
+    text: text ?? null,
+    songId: songId ?? null,
+    songTitle: songTitle ?? null,
+    requestedTitle: requestedTitle ?? null,
+    requestedArtist: requestedArtist ?? null,
+    nickname: nickname ?? null,
+  });
+  return db.prepare('SELECT * FROM messages WHERE id = ?').get(result.lastInsertRowid);
+}
+
+// Pending (unresolved) messages first, newest first within each group.
+export function listMessages(db) {
+  return db.prepare('SELECT * FROM messages ORDER BY resolved ASC, created_at DESC').all();
+}
+
+export function setMessageResolved(db, id, resolved) {
+  db.prepare('UPDATE messages SET resolved = ? WHERE id = ?').run(resolved ? 1 : 0, id);
+  return db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
+}
+
+export function deleteMessage(db, id) {
+  db.prepare('DELETE FROM messages WHERE id = ?').run(id);
 }
