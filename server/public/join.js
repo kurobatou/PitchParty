@@ -1,5 +1,6 @@
 import { downsampleTo16k, floatTo16BitPCM, escapeHtml, warnIfInsecureContext } from './audioUtils.js';
 import { toggleTheme, themeIcon } from './theme.js';
+import { messageTypeInfo } from './messageTypes.js';
 
 warnIfInsecureContext();
 
@@ -40,6 +41,24 @@ const phoneCountdownNumberEl = document.getElementById('phone-countdown-number')
 const phoneNextUpEl = document.getElementById('phone-next-up');
 const scorePctEl = document.getElementById('score-pct');
 const phoneDuetToggle = document.getElementById('phone-duet-toggle');
+
+const feedbackBtn = document.getElementById('feedback-btn');
+const feedbackOverlay = document.getElementById('feedback-modal-overlay');
+const feedbackTypePicker = document.getElementById('feedback-type-picker');
+const feedbackForm = document.getElementById('feedback-form');
+const feedbackBackBtn = document.getElementById('feedback-back-btn');
+const feedbackSyncFields = document.getElementById('feedback-sync-fields');
+const feedbackSongSearchEl = document.getElementById('feedback-song-search');
+const feedbackSongResultsEl = document.getElementById('feedback-song-results');
+const feedbackSongSelectedEl = document.getElementById('feedback-song-selected');
+const feedbackRequestFields = document.getElementById('feedback-request-fields');
+const feedbackReqTitleEl = document.getElementById('feedback-req-title');
+const feedbackReqArtistEl = document.getElementById('feedback-req-artist');
+const feedbackTextLabelEl = document.getElementById('feedback-text-label');
+const feedbackTextEl = document.getElementById('feedback-text');
+const feedbackCancelBtn = document.getElementById('feedback-cancel-btn');
+const feedbackSubmitBtn = document.getElementById('feedback-submit-btn');
+const feedbackStatusEl = document.getElementById('feedback-status');
 
 let role = null;
 let userId = null;
@@ -905,5 +924,140 @@ stopMicBtn.addEventListener('click', stopMic);
 advanceQueueBtn.addEventListener('click', () => {
   if (roomWs?.readyState === WebSocket.OPEN) {
     roomWs.send(JSON.stringify({ type: 'advanceQueue' }));
+  }
+});
+
+// --- "Enviar un mensaje": bug reports, out-of-sync songs, general notes,
+// and song/artist requests — a plain REST POST (no roomWs dependency), so
+// it works even from the initial nickname/role form, before joining. ---
+let feedbackType = null;
+let feedbackSongId = null;
+
+function resetFeedbackForm() {
+  feedbackType = null;
+  feedbackSongId = null;
+  feedbackSongSearchEl.value = '';
+  feedbackSongResultsEl.innerHTML = '';
+  feedbackSongSelectedEl.textContent = '';
+  feedbackReqTitleEl.value = '';
+  feedbackReqArtistEl.value = '';
+  feedbackTextEl.value = '';
+  feedbackStatusEl.classList.add('hidden');
+  feedbackSubmitBtn.disabled = false;
+  feedbackSubmitBtn.textContent = 'Enviar';
+}
+
+function openFeedbackModal() {
+  resetFeedbackForm();
+  feedbackForm.classList.add('hidden');
+  feedbackTypePicker.classList.remove('hidden');
+  feedbackOverlay.classList.remove('hidden');
+}
+
+function closeFeedbackModal() {
+  feedbackOverlay.classList.add('hidden');
+}
+
+function renderFeedbackSongResults(query) {
+  const q = query.trim().toLowerCase();
+  const matches = (q
+    ? allSongs.filter((s) => s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q))
+    : allSongs
+  ).slice(0, 20);
+
+  if (matches.length === 0) {
+    feedbackSongResultsEl.innerHTML = '<li class="no-results">Ninguna canción coincide.</li>';
+    return;
+  }
+  feedbackSongResultsEl.innerHTML = matches.map((s) => `
+    <li data-id="${s.id}">
+      <div>${escapeHtml(s.title)}</div>
+      <div class="song-artist">${escapeHtml(s.artist)}</div>
+    </li>
+  `).join('');
+  feedbackSongResultsEl.querySelectorAll('li[data-id]').forEach((li) => {
+    li.addEventListener('click', () => {
+      const song = allSongs.find((s) => s.id === Number(li.dataset.id));
+      if (!song) return;
+      feedbackSongId = song.id;
+      feedbackSongSelectedEl.textContent = `Elegida: ${song.artist} — ${song.title}`;
+      feedbackSongResultsEl.innerHTML = '';
+      feedbackSongSearchEl.value = '';
+    });
+  });
+}
+
+async function selectFeedbackType(type) {
+  feedbackType = type;
+  feedbackTypePicker.classList.add('hidden');
+  feedbackForm.classList.remove('hidden');
+
+  const isSync = type === 'sync';
+  const isRequest = type === 'song_request';
+  feedbackSyncFields.classList.toggle('hidden', !isSync);
+  feedbackRequestFields.classList.toggle('hidden', !isRequest);
+  feedbackTextEl.rows = isRequest ? 2 : 3;
+  feedbackTextLabelEl.textContent = isRequest ? 'Nota (opcional)' : isSync ? 'Contanos qué está desincronizado' : 'Contanos más';
+
+  if (isSync) {
+    if (allSongs.length === 0) await loadAllSongs();
+    // If there's already a song picked/being sung, default to it.
+    if (selectedSongId && !feedbackSongId) {
+      feedbackSongId = selectedSongId;
+      feedbackSongSelectedEl.textContent = selectedSongTitle ? `Elegida: ${selectedSongTitle}` : '';
+    }
+    renderFeedbackSongResults('');
+  }
+}
+
+feedbackBtn.addEventListener('click', openFeedbackModal);
+feedbackCancelBtn.addEventListener('click', closeFeedbackModal);
+feedbackBackBtn.addEventListener('click', () => {
+  feedbackForm.classList.add('hidden');
+  feedbackTypePicker.classList.remove('hidden');
+});
+feedbackTypePicker.querySelectorAll('.feedback-type-btn').forEach((btn) => {
+  btn.addEventListener('click', () => selectFeedbackType(btn.dataset.type));
+});
+feedbackSongSearchEl.addEventListener('input', () => renderFeedbackSongResults(feedbackSongSearchEl.value));
+
+feedbackSubmitBtn.addEventListener('click', async () => {
+  const nickname = nicknameEl.value.trim() || undefined;
+  const text = feedbackTextEl.value.trim() || undefined;
+  let payload;
+
+  if (feedbackType === 'bug' || feedbackType === 'general') {
+    if (!text) { feedbackTextEl.focus(); return; }
+    payload = { type: feedbackType, text, nickname };
+  } else if (feedbackType === 'sync') {
+    if (!feedbackSongId) { feedbackSongSearchEl.focus(); return; }
+    payload = { type: 'sync', songId: feedbackSongId, text, nickname };
+  } else if (feedbackType === 'song_request') {
+    const requestedTitle = feedbackReqTitleEl.value.trim();
+    if (!requestedTitle) { feedbackReqTitleEl.focus(); return; }
+    payload = { type: 'song_request', requestedTitle, requestedArtist: feedbackReqArtistEl.value.trim() || undefined, text, nickname };
+  } else {
+    return;
+  }
+
+  feedbackSubmitBtn.disabled = true;
+  feedbackSubmitBtn.textContent = 'Enviando...';
+  try {
+    const res = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'error del servidor');
+
+    feedbackStatusEl.textContent = `¡Gracias! Anotamos tu ${messageTypeInfo(feedbackType).label.toLowerCase()}.`;
+    feedbackStatusEl.classList.remove('hidden');
+    feedbackSubmitBtn.textContent = 'Enviado ✓';
+    setTimeout(closeFeedbackModal, 1500);
+  } catch (err) {
+    feedbackStatusEl.textContent = `No se pudo enviar: ${err.message}`;
+    feedbackStatusEl.classList.remove('hidden');
+    feedbackSubmitBtn.disabled = false;
+    feedbackSubmitBtn.textContent = 'Enviar';
   }
 });

@@ -7,7 +7,8 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 
 import { loadConfig } from './config.js';
-import { openDb, listSongs, getSongById } from './db.js';
+import { openDb, listSongs, getSongById, insertMessage, listMessages, setMessageResolved, deleteMessage } from './db.js';
+import { validateMessagePayload } from './messages.js';
 import { reindexLibrary } from './indexer.js';
 import { parseUsdxTxt, beatToMs } from './usdxParser.js';
 import { readUsdxTxtFile } from './txtEncoding.js';
@@ -142,6 +143,50 @@ app.get('/api/songs/:id', async (request, reply) => {
 
 app.post('/api/reindex', async () => {
   return reindexLibrary(db, currentLibraryPaths(), app.log);
+});
+
+// "Send a message from the phone" — bug reports, out-of-sync songs, general
+// notes, and song/artist requests, so things noticed mid-session actually
+// get written down somewhere instead of forgotten (see messages.js for the
+// four known types and their per-type required fields).
+app.post('/api/messages', async (request, reply) => {
+  const result = validateMessagePayload(request.body ?? {});
+  if (!result.ok) return reply.code(400).send({ error: result.error });
+
+  const value = result.value;
+  let songTitle = null;
+  if (value.type === 'sync') {
+    const song = getSongById(db, value.songId);
+    if (!song) return reply.code(400).send({ error: 'song not found' });
+    songTitle = `${song.artist} — ${song.title}`;
+  }
+
+  return insertMessage(db, {
+    type: value.type,
+    text: value.text ?? null,
+    songId: value.type === 'sync' ? value.songId : null,
+    songTitle,
+    requestedTitle: value.requestedTitle ?? null,
+    requestedArtist: value.requestedArtist ?? null,
+    nickname: value.nickname,
+  });
+});
+
+app.get('/api/messages', async () => {
+  return listMessages(db);
+});
+
+app.patch('/api/messages/:id', async (request, reply) => {
+  const id = Number(request.params.id);
+  const resolved = Boolean(request.body?.resolved);
+  const updated = setMessageResolved(db, id, resolved);
+  if (!updated) return reply.code(404).send({ error: 'message not found' });
+  return updated;
+});
+
+app.delete('/api/messages/:id', async (request, reply) => {
+  deleteMessage(db, Number(request.params.id));
+  return reply.code(204).send();
 });
 
 app.get('/api/settings', async () => {

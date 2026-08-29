@@ -849,6 +849,51 @@ html, body {
   border-radius: 4px;
 }
 
+.message-list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.message-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--page);
+}
+
+.message-item.resolved {
+  opacity: 0.55;
+}
+
+.message-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.message-type-badge {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.message-item-body {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.message-item-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .settings-row {
   display: flex;
   align-items: center;
@@ -1077,7 +1122,8 @@ html, body {
   color: var(--muted);
 }
 
-.mic-modal input[type="text"] {
+.mic-modal input[type="text"],
+.mic-modal textarea {
   width: 100%;
   padding: 9px 11px;
   border-radius: 8px;
@@ -1085,6 +1131,37 @@ html, body {
   background: var(--page);
   color: var(--text);
   font-size: 15px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.feedback-type-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.feedback-type-btn {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  background: var(--page);
+  color: var(--text);
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.feedback-type-btn:hover {
+  border-color: var(--accent);
+}
+
+.feedback-back-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 0 0 12px;
+  cursor: pointer;
 }
 
 .mic-modal-selected {

@@ -24,6 +24,7 @@
     <div class="join-header">
       <div class="avatar hidden" id="avatar"></div>
       <h1 id="page-title">🎤 PitchParty</h1>
+      <button id="feedback-btn" class="theme-toggle-btn" title="Enviar un mensaje" type="button">📨</button>
       <button id="theme-toggle" class="theme-toggle-btn" title="Cambiar tema" type="button">🌙</button>
     </div>
 
@@ -90,6 +91,46 @@
     <div id="step-guest" class="hidden">
       <p class="status-line">Estás conectado como invitado. Vas a ver tu estado reflejado en la pantalla principal.</p>
       <button id="become-singer-btn" type="button">🎙️ Quiero cantar</button>
+    </div>
+  </div>
+
+  <div id="feedback-modal-overlay" class="mic-modal-overlay hidden">
+    <div class="mic-modal">
+      <h3>📨 Enviar un mensaje</h3>
+
+      <div id="feedback-type-picker" class="feedback-type-picker">
+        <button type="button" class="feedback-type-btn" data-type="bug">🐞 Bug de la interfaz</button>
+        <button type="button" class="feedback-type-btn" data-type="sync">🎵 Canción con mala sincronización</button>
+        <button type="button" class="feedback-type-btn" data-type="general">💬 Mensaje general</button>
+        <button type="button" class="feedback-type-btn" data-type="song_request">🎤 Pedir canción/artista</button>
+      </div>
+
+      <div id="feedback-form" class="hidden">
+        <button type="button" id="feedback-back-btn" class="feedback-back-btn">← Elegir otro tipo</button>
+
+        <div id="feedback-sync-fields" class="hidden">
+          <label class="mic-modal-label">Canción</label>
+          <input id="feedback-song-search" type="text" placeholder="Buscar por título o artista..." autocomplete="off" />
+          <ul id="feedback-song-results" class="song-results"></ul>
+          <div id="feedback-song-selected" class="mic-modal-selected"></div>
+        </div>
+
+        <div id="feedback-request-fields" class="hidden">
+          <label class="mic-modal-label">Título</label>
+          <input id="feedback-req-title" type="text" placeholder="Título de la canción" />
+          <label class="mic-modal-label">Artista (opcional)</label>
+          <input id="feedback-req-artist" type="text" placeholder="Artista" />
+        </div>
+
+        <label id="feedback-text-label" class="mic-modal-label">Contanos más</label>
+        <textarea id="feedback-text" rows="3" placeholder="Escribí acá..."></textarea>
+
+        <div class="mic-modal-actions">
+          <button type="button" id="feedback-cancel-btn">Cancelar</button>
+          <button type="button" id="feedback-submit-btn" class="primary-btn">Enviar</button>
+        </div>
+        <p id="feedback-status" class="settings-hint hidden"></p>
+      </div>
     </div>
   </div>
 
