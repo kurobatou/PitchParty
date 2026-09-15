@@ -1,6 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeMicMonitor } from '../src/settings.js';
+import { normalizeMicMonitor, normalizePhoneMic } from '../src/settings.js';
+
+test('normalizePhoneMic defaults to off with the music at 70%', () => {
+  assert.deepEqual(normalizePhoneMic(null), { enabled: false, musicVolume: 70 });
+  assert.deepEqual(normalizePhoneMic(undefined), { enabled: false, musicVolume: 70 });
+});
+
+test('normalizePhoneMic coerces enabled and clamps musicVolume to 0..100', () => {
+  assert.equal(normalizePhoneMic({ enabled: 1 }).enabled, true);
+  assert.equal(normalizePhoneMic({ enabled: 0 }).enabled, false);
+  assert.equal(normalizePhoneMic({ musicVolume: 250 }).musicVolume, 100);
+  assert.equal(normalizePhoneMic({ musicVolume: -5 }).musicVolume, 0);
+  assert.equal(normalizePhoneMic({ musicVolume: 'x' }).musicVolume, 70);
+});
 
 test('normalizeMicMonitor fills sane defaults from null/undefined', () => {
   assert.deepEqual(normalizeMicMonitor(null), {

@@ -59,6 +59,12 @@ La columna **Verificación** dice cómo se comprueba hoy:
 | 28 | Dado un `rejoin` con un `userId` que ya no existe, cuando llega, entonces el servidor responde `rejoinFailed` y el cliente vuelve al formulario de unirse. | `test:room` |
 | 29 | Dado un socket viejo que reporta su cierre **después** de que el usuario ya reconectó con otro, cuando llega ese `close`, entonces se ignora (no borra a un usuario que está conectado). | manual |
 | 30 | Dado un invitado que quiere cantar, cuando manda `setRole: singer`, entonces cambia de rol sin tener que desconectarse y volver a unirse. | manual (Mac) |
+| 66 | Dado un `join` sin apodo, cuando el servidor responde `welcome`, entonces incluye el `nickname` asignado (`Invitado-xxxx`), y el celular muestra ese mismo nombre que ve la Sala. | manual (navegador) |
+| 67 | Dado un usuario encolado, cuando manda `setNickname`, entonces cambia su nombre **sin perder** su posición en la cola ni su estado de turno. | `test:room` |
+| 68 | Dado un `setNickname` con espacios sobrantes o más de 24 caracteres, cuando se aplica, entonces el nombre se recorta y se limita a 24. | `test:room` |
+| 69 | Dado un `setNickname` vacío o solo con espacios, cuando se aplica, entonces se conserva el nombre anterior (nadie queda sin nombre). | `test:room` |
+| 70 | Dado un `setNickname` de un `userId` inexistente, cuando se procesa, entonces no rompe ni crea usuarios (devuelve `null`). | `test:room` |
+| 71 | Dado un usuario ya unido, cuando toca su propio nombre en el encabezado del celular, entonces se abre el modal de renombrado con el nombre actual precargado. | manual (navegador) |
 
 ## 6.4 Modos, duetos y participantes sin celular
 
@@ -72,7 +78,24 @@ La columna **Verificación** dice cómo se comprueba hoy:
 | 36 | Dado el modo Karaoke, cuando la Sala emite `karaokeProgress`, entonces todos los celulares conectados reciben `songId` y `positionMs` para sincronizar la letra. | manual (Mac) |
 | 37 | Dada una canción de dueto, cuando el celular elige `duo` o `solo` (al elegir canción o después con `setDuetMode`), entonces esa elección viaja en `nowPlaying` y la Sala reproduce en consecuencia. | manual (Mac) |
 
-## 6.5 Mensajes desde el celular
+## 6.5 Micrófono desde el celular (modo Karaoke)
+
+| # | Criterio | Verificación |
+|---|---|---|
+| 72 | Dado un `phoneMic` nulo o incompleto, cuando se normaliza, entonces queda apagado con la música al 70% (`enabled: false`, `musicVolume: 70`). | `test:settings` |
+| 73 | Dado un `phoneMic.musicVolume` fuera de rango o no numérico, cuando se normaliza, entonces se recorta a 0-100 (o cae a 70). | `test:settings` |
+| 74 | Dado el interruptor global, cuando se guarda desde Configuración, entonces `Room.phoneMicEnabled` se actualiza y viaja en el siguiente `roomState` **sin reiniciar** el servidor. | `test:room` (broadcast) + manual (curl) |
+| 75 | Dado que nadie está en su turno, cuando un celular manda audio por `/ws/mic/:userId`, entonces el servidor lo descarta (no llega nada a `/ws/micmix`). | manual (curl) |
+| 76 | Dado el celular del turno actual, cuando manda audio, entonces sus frames llegan a la Sala tal cual. | manual (curl) |
+| 77 | Dado un celular que **no** tiene el turno, cuando manda audio, entonces se descarta aunque su socket siga abierto. | manual (curl) |
+| 78 | Dado el interruptor global apagado, cuando el celular del turno manda audio, entonces también se descarta. | manual (curl) |
+| 79 | Dado un turno que termina, cuando el cantante deja de tener el turno, entonces su audio deja de sonar (la regla se evalúa por frame, no al conectar). | `test:room` |
+| 80 | Dado el modo Karaoke con la función habilitada, cuando el cantante entra al flujo de turno, entonces ve el botón de micrófono **apagado por defecto**. | manual (navegador) |
+| 81 | Dado el interruptor global apagado, cuando un celular entra a su turno, entonces el botón no aparece; en modo UltraStar tampoco aparece nunca. | manual (navegador) |
+| 82 | Dado un cantante que arma el botón mientras espera, cuando llega su turno, entonces la captura arranca sola (el permiso de micrófono se pidió en el toque, no al arrancar el turno). | manual (Mac) |
+| 83 | Dado audio llegando del celular, cuando suena por los parlantes, entonces la música baja a `phoneMic.musicVolume` y se restaura al dejar de llegar. | manual (Mac) |
+
+## 6.6 Mensajes desde el celular
 
 | # | Criterio | Verificación |
 |---|---|---|
@@ -94,7 +117,7 @@ La columna **Verificación** dice cómo se comprueba hoy:
 | 64 | Dado que no hay resueltos, cuando se llama a ese endpoint igual, entonces responde `{ deleted: 0 }` con `200` en vez de error. | manual (curl) |
 | 65 | Dada la acción de borrado masivo en la bandeja, cuando se cancela la confirmación, entonces no se borra nada; cuando se confirma, la lista se actualiza sola y avisa cuántos borró. | manual (navegador) |
 
-## 6.6 Configuración
+## 6.7 Configuración
 
 | # | Criterio | Verificación |
 |---|---|---|
@@ -104,7 +127,7 @@ La columna **Verificación** dice cómo se comprueba hoy:
 | 50 | Dado un cambio de `libraryPaths`, cuando se guarda, entonces se dispara un reindexado en la misma request. | manual |
 | 51 | Dado un cambio de IP LAN o de certificado, cuando se guarda, entonces la respuesta avisa que **requiere reiniciar** el proceso para tomar efecto. | manual |
 
-## 6.7 Experiencia en vivo (solo verificable en el MacBook)
+## 6.8 Experiencia en vivo (solo verificable en el MacBook)
 
 Nada de esto tiene test automatizado y probablemente nunca lo tenga: necesita micrófono real, HTTPS y celulares de verdad.
 

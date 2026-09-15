@@ -5,7 +5,8 @@
 ```
 Celular — Cantante/Invitado (PWA, navegador)
   ├─ WebSocket /ws/room    (join, elegir canción, cola, ranking, latencia, avanzar rotación)
-  └─ WebSocket /ws/sing/:songId  (solo cantante: sube PCM16 mono 16kHz, recibe frames de puntaje)
+  ├─ WebSocket /ws/sing/:songId  (modo UltraStar: sube PCM16 mono 16kHz, recibe frames de puntaje)
+  └─ WebSocket /ws/mic/:userId   (modo Karaoke, opt-in: sube PCM16 mono 16kHz para sonar por los parlantes)
                     │
                     ▼
         ┌───────────────────────────────────────────────┐
@@ -24,6 +25,7 @@ Celular — Cantante/Invitado (PWA, navegador)
         └───────────────────────┬───────────────────────┘
                                 │ HTTP (estáticos + audio/video/cover)
                                 │ WebSocket /ws/room (estado, letras, QR ya generado, latencia)
+                                │ WebSocket /ws/micmix (audio del celular del turno → parlantes)
                                 ▼
         Pantalla principal — "Sala" (navegador de la TV o equipo por HDMI)
 
@@ -54,14 +56,14 @@ No hay bundler, transpilador ni gestor de paquetes del lado del cliente — los 
 
 | Archivo | Responsabilidad |
 |---|---|
-| `index.js` | Punto de entrada. Arma Fastify, registra rutas HTTP y los dos WebSockets (`/ws/room`, `/ws/sing/:songId`), decide qué certificado HTTPS usar, orquesta el indexado inicial. Es el único lugar que conoce el protocolo completo — ver [03-protocol.md](03-protocol.md). |
+| `index.js` | Punto de entrada. Arma Fastify, registra rutas HTTP y los cuatro WebSockets (`/ws/room`, `/ws/sing/:songId`, y el par de relay de micrófono `/ws/mic/:userId` + `/ws/micmix`), decide qué certificado HTTPS usar, orquesta el indexado inicial. Es el único lugar que conoce el protocolo completo — ver [03-protocol.md](03-protocol.md). |
 | `config.js` | Lee `config.json` (raíz del repo): solo aporta el valor por defecto de `libraryPaths` en el primer arranque. |
-| `settings.js` | Persiste/lee `server/data/settings.json`: carpetas de biblioteca vigentes, override de IP LAN, dominio público + token de Cloudflare + email para Let's Encrypt, y `localMics` (micrófonos físicos asignados a cantantes). Esto es lo que la UI de Configuración edita en caliente. |
+| `settings.js` | Persiste/lee `server/data/settings.json`: carpetas de biblioteca vigentes, override de IP LAN, dominio público + token de Cloudflare + email para Let's Encrypt, `localMics` (micrófonos físicos asignados a cantantes), `micMonitor` (monitor de un mic físico de la Sala) y `phoneMic` (permitir que los celulares hagan de micrófono). Esto es lo que la UI de Configuración edita en caliente. |
 | `db.js` | Apertura de SQLite + CRUD de la tabla `songs` (`upsertSong`, `removeMissingSongs`, `listSongs`, `getSongById`). |
 | `indexer.js` | Escanea cada carpeta de biblioteca configurada (una subcarpeta = una canción, no recursivo), parsea su `.txt`, y hace upsert/removeMissing en SQLite. Se corre al arrancar y bajo demanda (`POST /api/reindex`, o al guardar `libraryPaths` desde Configuración). |
 | `usdxParser.js` | Parser del formato de texto UltraStar Deluxe: metadata (`#TITLE`, `#BPM`, `#GAP`, etc.) + líneas de letra/notas. Expone `beatToMs` para convertir beats a milisegundos absolutos. |
 | `txtEncoding.js` | Lee el `.txt` de una canción detectando su encoding real (los `.txt` de UltraStar no siempre son UTF-8). |
-| `room.js` | Estado de la sala en memoria: usuarios conectados, cola de turnos, cantantes activos, ranking de la sesión, modo de baja latencia, reconexión con período de gracia. Ver [04-data-model.md](04-data-model.md) para el detalle campo por campo. |
+| `room.js` | Estado de la sala en memoria: usuarios conectados, cola de turnos, cantantes activos, ranking de la sesión, modo de baja latencia, reconexión con período de gracia, renombrado en caliente (`setNickname`) y la autorización del micrófono por celular (`canRelayMic`). Ver [04-data-model.md](04-data-model.md) para el detalle campo por campo. |
 | `pitch.js` | `detectPitch(samples, sampleRate)`: estima la frecuencia fundamental de una ventana de audio por autocorrelación, o `null` si es silencio. |
 | `scoring.js` | `ScoringSession`: compara la nota detectada contra la esperada del `.txt` (tolerante a octava) y acumula puntaje frame a frame. `notesFromSongPayload` aplana las notas de una canción a la forma que consume la sesión. |
 | `messages.js` | `MESSAGE_TYPES` (`bug`, `sync`, `general`, `song_request`) + `validateMessagePayload()`: validación pura de los mensajes que manda un celular, sin tocar SQLite (por eso es testeable sola). `index.js` es el que resuelve el `songId` de un reporte `sync` contra el catálogo y persiste la fila. |
@@ -75,9 +77,9 @@ No hay bundler, transpilador ni gestor de paquetes del lado del cliente — los 
 
 | Archivo | Responsabilidad |
 |---|---|
-| `index.html` / `app.js` | La **Sala** (pantalla principal): catálogo con buscador y salto alfabético, reproductor (letra, progreso, fondo con video o con ondas de audio reales dibujadas en canvas), QR, lista de conectados, cola, ranking, indicador de latencia, toggle de baja latencia, toggle de tema. |
-| `join.html` / `join.js` | Pantalla del **celular**: elegir apodo/rol, buscar canción, esperar en cola, cantar (captura de mic, envío de PCM16 por `/ws/sing`, letra previa/actual/siguiente, ecualizador de afinación en vivo derivado 100% en cliente de los frames de puntaje), avanzar cola, reconexión/rejoin con recuperación de sesión (`localStorage`). |
-| `settings.html` / `settings.js` | Pantalla de **Configuración**: carpetas de biblioteca (con selector nativo o ruta a mano), IP LAN, dominio + token de Cloudflare para Let's Encrypt, y **habilitación** de micrófonos físicos (enumera `audioinput` vía `enumerateDevices` tras un permiso de mic; guarda los tildados como `{deviceId, label}` en `localMics`, sin nombre de cantante). Sin rediseño visual propio — hereda la paleta de `style.css` pasivamente. |
+| `index.html` / `app.js` | La **Sala** (pantalla principal): catálogo con buscador y salto alfabético, reproductor (letra, progreso, fondo con video o con ondas de audio reales dibujadas en canvas), QR, lista de conectados, cola, ranking, indicador de latencia, toggle de baja latencia, toggle de tema. En modo Karaoke, además, reproduce por los parlantes el audio que llega de `/ws/micmix` (jitter buffer + atenuación de la música) cuando el micrófono por celular está habilitado. |
+| `join.html` / `join.js` | Pantalla del **celular**: elegir apodo/rol, buscar canción, esperar en cola, cantar (captura de mic, envío de PCM16 por `/ws/sing`, letra previa/actual/siguiente, ecualizador de afinación en vivo derivado 100% en cliente de los frames de puntaje), avanzar cola, reconexión/rejoin con recuperación de sesión (`localStorage`), renombrarse tocando el propio nombre en el encabezado, y — en modo Karaoke y si está habilitado — un botón **apagado por defecto** para usar el celular como micrófono (captura y envío por `/ws/mic/:userId`). |
+| `settings.html` / `settings.js` | Pantalla de **Configuración**: carpetas de biblioteca (con selector nativo o ruta a mano), IP LAN, dominio + token de Cloudflare para Let's Encrypt, y **habilitación** de micrófonos físicos (enumera `audioinput` vía `enumerateDevices` tras un permiso de mic; guarda los tildados como `{deviceId, label}` en `localMics`, sin nombre de cantante), el monitor de micrófono de la Sala (`micMonitor`), y el interruptor global del micrófono desde el celular (`phoneMic`). Sin rediseño visual propio — hereda la paleta de `style.css` pasivamente. |
 | `localmics.js` | Cargado por la **Sala**. Expone `window.localMics` (API que usa `app.js`) y gestiona: (a) agregar un cantante sin celular vía un modal (nombre + canción) que abre su **propio** `/ws/room` como `singer` y hace `chooseSong` → entra a la cola; (b) la captura de audio del turno. Justo antes del turno de un mic-singer, `app.js` muestra una pantalla de preparación (elegir/probar el mic con medidor de nivel); al "Empezar", `localmics.js` captura desde el `deviceId` elegido y streamea a `/ws/sing`, alineado con la cuenta atrás. El servidor no distingue un mic local de un celular. |
 | `messages.html` / `messages.js` | Bandeja de **mensajes**: lista lo que dejaron los celulares (bugs, canciones desincronizadas, notas generales, pedidos de canción), permite marcarlos como resueltos (`PATCH`) y borrarlos (`DELETE`). Se abre desde la Sala. |
 | `messageTypes.js` | Los cuatro tipos de mensaje y sus etiquetas, compartidos entre el formulario del celular (`join.js`) y la bandeja (`messages.js`) para que no se dupliquen strings. El espejo del lado del servidor es `server/src/messages.js`. |

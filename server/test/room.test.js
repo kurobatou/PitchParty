@@ -16,6 +16,62 @@ test('join creates a user with defaults and a fallback nickname', () => {
   assert.ok(user.nickname.startsWith('Invitado-'), 'blank nickname gets a default');
 });
 
+test('setNickname renames in place, trims/caps, and keeps the queue spot', () => {
+  const room = new Room();
+  const id = room.join(fakeSocket(), { nickname: '', role: 'singer' });
+  room.enqueue(id);
+
+  assert.equal(room.setNickname(id, '  Batou  '), 'Batou', 'trims whitespace');
+  assert.equal(room.users.get(id).nickname, 'Batou');
+  assert.deepEqual(room.queue, [id], 'renaming keeps the queue position');
+  assert.equal(room.users.get(id).state, 'queued');
+
+  assert.equal(room.setNickname(id, 'x'.repeat(40)), 'x'.repeat(24), 'caps at 24 chars');
+  assert.equal(room.setNickname(id, '   '), 'x'.repeat(24), 'blank keeps the current name');
+  assert.equal(room.setNickname('nope', 'Ana'), null, 'unknown id returns null');
+});
+
+test('setPhoneMicEnabled is off by default and rides along in roomState', () => {
+  const room = new Room();
+  assert.equal(room.phoneMicEnabled, false, 'off unless explicitly enabled');
+
+  const socket = fakeSocket();
+  room.join(socket, { nickname: 'Ana', role: 'singer' });
+  room.setPhoneMicEnabled(1);
+  assert.equal(room.phoneMicEnabled, true);
+
+  room.broadcastState();
+  const state = JSON.parse(socket.sent.at(-1));
+  assert.equal(state.phoneMicEnabled, true, 'phones learn the switch from roomState');
+
+  room.setPhoneMicEnabled(false);
+  room.broadcastState();
+  assert.equal(JSON.parse(socket.sent.at(-1)).phoneMicEnabled, false);
+});
+
+test('canRelayMic only lets the current turn through', () => {
+  const room = new Room();
+  const singer = room.join(fakeSocket(), { nickname: 'Ana', role: 'singer' });
+  const other = room.join(fakeSocket(), { nickname: 'Beto', role: 'singer' });
+  room.update(singer, { songId: 1, songTitle: 'X' });
+  room.enqueue(singer);
+  room.setPhoneMicEnabled(true);
+
+  assert.equal(room.canRelayMic(singer), false, 'nobody is on stage yet');
+
+  room.advanceQueue();
+  assert.equal(room.nowPlaying.userId, singer);
+  assert.equal(room.canRelayMic(singer), true, 'the singer on stage is heard');
+  assert.equal(room.canRelayMic(other), false, 'a bystander is never relayed');
+
+  room.setPhoneMicEnabled(false);
+  assert.equal(room.canRelayMic(singer), false, 'global switch off silences everyone');
+
+  room.setPhoneMicEnabled(true);
+  room.abandonTurn(singer);
+  assert.equal(room.canRelayMic(singer), false, 'the turn ended, so does the audio');
+});
+
 test('enqueue queues once and sets state; no double-enqueue', () => {
   const room = new Room();
   const id = room.join(fakeSocket(), { nickname: 'Ana', role: 'singer' });

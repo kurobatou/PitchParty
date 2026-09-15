@@ -25,6 +25,12 @@ const saveMonitorBtn = document.getElementById('save-monitor-btn');
 const monitorStatusEl = document.getElementById('monitor-status');
 let monitorDeviceId = null; // saved monitor mic (may not be visible right now)
 
+const phoneMicEnabledEl = document.getElementById('phonemic-enabled');
+const phoneMicVolumeEl = document.getElementById('phonemic-volume');
+const phoneMicVolumeValEl = document.getElementById('phonemic-volume-val');
+const savePhoneMicBtn = document.getElementById('save-phonemic-btn');
+const phoneMicStatusEl = document.getElementById('phonemic-status');
+
 const publicDomainEl = document.getElementById('public-domain');
 const cloudflareTokenEl = document.getElementById('cloudflare-token');
 const acmeEmailEl = document.getElementById('acme-email');
@@ -101,6 +107,12 @@ async function loadSettings() {
   monitorVolumeEl.value = vol;
   monitorVolumeValEl.textContent = `${vol}%`;
   renderMonitorDevices();
+
+  const pm = data.phoneMic || {};
+  phoneMicEnabledEl.checked = Boolean(pm.enabled);
+  const pmVol = Number.isFinite(pm.musicVolume) ? pm.musicVolume : 70;
+  phoneMicVolumeEl.value = pmVol;
+  phoneMicVolumeValEl.textContent = `${pmVol}%`;
 }
 
 // Fills the monitor mic <select> from the detected inputs, keeping the saved
@@ -142,6 +154,28 @@ saveMonitorBtn.addEventListener('click', async () => {
   monitorStatusEl.textContent = mm.enabled
     ? `Guardado — monitor activo, música al ${mm.musicVolume}%. Recargá la Sala para aplicarlo.`
     : 'Guardado — monitor desactivado.';
+});
+
+phoneMicVolumeEl.addEventListener('input', () => { phoneMicVolumeValEl.textContent = `${phoneMicVolumeEl.value}%`; });
+
+savePhoneMicBtn.addEventListener('click', async () => {
+  const phoneMic = {
+    enabled: phoneMicEnabledEl.checked,
+    musicVolume: Number(phoneMicVolumeEl.value),
+  };
+  phoneMicStatusEl.textContent = 'Guardando...';
+  const res = await fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phoneMic }),
+  });
+  const data = await res.json();
+  if (!res.ok) { phoneMicStatusEl.textContent = `Error: ${data.error}`; return; }
+  const pm = data.phoneMic || {};
+  // Applies live (the server re-broadcasts roomState) — no restart needed.
+  phoneMicStatusEl.textContent = pm.enabled
+    ? `Guardado — los celulares ya pueden usarse como micrófono, música al ${pm.musicVolume}%.`
+    : 'Guardado — micrófono desde el celular desactivado.';
 });
 
 // Renders one checkbox row per known audio input, plus any enabled mic whose

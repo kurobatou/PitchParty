@@ -10,7 +10,7 @@
 |---|---|
 | Qué es el producto, roles, decisiones, fuera de alcance | [`docs/sdd/01-overview.md`](docs/sdd/01-overview.md) |
 | Cómo está armado, qué hace cada archivo | [`docs/sdd/02-architecture.md`](docs/sdd/02-architecture.md) |
-| Endpoints HTTP y mensajes de los dos WebSockets | [`docs/sdd/03-protocol.md`](docs/sdd/03-protocol.md) |
+| Endpoints HTTP y mensajes de los WebSockets | [`docs/sdd/03-protocol.md`](docs/sdd/03-protocol.md) |
 | Tablas SQLite, settings, estado de `Room` | [`docs/sdd/04-data-model.md`](docs/sdd/04-data-model.md) |
 | Qué está hecho y qué brechas hay | [`docs/sdd/05-status-roadmap.md`](docs/sdd/05-status-roadmap.md) |
 | Criterios de aceptación numerados (y qué test cubre cada uno) | [`docs/sdd/06-acceptance.md`](docs/sdd/06-acceptance.md) |

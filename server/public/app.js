@@ -415,12 +415,9 @@ async function openSong(id, { withCountdown = false, ask = false, duetMode = nul
     // A newer turn may have superseded this one during the countdown wait.
     if (currentSongId !== song.id) return;
     // Karaoke mic monitor: duck the music and play the mic through the speakers.
-    if (currentMode === 'karaoke' && micMonitorConfig.enabled) {
-      audioEl.volume = Math.max(0, Math.min(1, micMonitorConfig.musicVolume / 100));
-      startMicMonitor();
-    } else {
-      audioEl.volume = 1;
-    }
+    if (currentMode === 'karaoke' && micMonitorConfig.enabled) startMicMonitor();
+    // Don't stomp on the phone-mic ducking if a singer is already streaming.
+    if (!phoneMicDucked) audioEl.volume = musicVolumeWithoutPhoneMic();
     audioEl.play().catch(() => {});
     if (useVideo) {
       bgVideoEl.play().catch(() => {});
@@ -845,13 +842,17 @@ function showKaraokeAnnounce(nickname, songTitle, onDone) {
 // play, ducking the music. Config comes from Settings (/api/settings). The
 // stream stays open for the whole Karaoke session (not per song) so a
 // Bluetooth mic doesn't re-handshake between turns. ---
+let phoneMicConfig = { enabled: false, musicVolume: 70 };
 let micMonitorConfig = { enabled: false, deviceId: null, musicVolume: 70 };
 let micMonitor = null; // { stream, ctx, source }
 let karaokeProgressTimer = null; // broadcasts playback position to phones
 
 fetch('/api/settings')
   .then((r) => r.json())
-  .then((s) => { if (s.micMonitor) micMonitorConfig = s.micMonitor; })
+  .then((s) => {
+    if (s.micMonitor) micMonitorConfig = s.micMonitor;
+    if (s.phoneMic) phoneMicConfig = s.phoneMic;
+  })
   .catch(() => {});
 
 async function startMicMonitor() {
@@ -881,6 +882,125 @@ function stopMicMonitor() {
   try { m.source?.disconnect(); } catch {}
   try { m.stream?.getTracks().forEach((t) => t.stop()); } catch {}
   try { m.ctx?.close(); } catch {}
+}
+
+// --- Karaoke "phone as a wireless mic": play the singer's phone audio through
+// the Sala's speakers. The server relays raw 16kHz PCM (see /ws/micmix) and
+// only ever from the phone whose turn it is, so here we just buffer and play.
+//
+// A small jitter buffer absorbs WiFi hiccups: we hold ~100ms before starting
+// playback, then feed the audio graph from the queue. On underrun we output
+// silence and re-buffer instead of clicking.
+const PHONE_MIC_PREBUFFER_SAMPLES = 1600; // ~100ms at 16kHz
+const PHONE_MIC_IDLE_MS = 600; // no frames for this long = singer stopped
+
+let phoneMicWs = null;
+let phoneMicCtx = null;
+let phoneMicNode = null;
+let phoneMicChunks = []; // pending Float32Array chunks
+let phoneMicQueued = 0; // samples still unplayed
+let phoneMicReadOffset = 0; // read position inside chunks[0]
+let phoneMicFilling = true; // true while waiting for the prebuffer
+let phoneMicDucked = false;
+let phoneMicIdleTimer = null;
+
+// What the music volume should be when the phone mic is NOT sounding — the
+// existing local mic monitor may already be ducking it.
+function musicVolumeWithoutPhoneMic() {
+  if (currentMode === 'karaoke' && micMonitorConfig.enabled) {
+    return Math.max(0, Math.min(1, micMonitorConfig.musicVolume / 100));
+  }
+  return 1;
+}
+
+function duckForPhoneMic() {
+  if (!phoneMicDucked) {
+    phoneMicDucked = true;
+    audioEl.volume = Math.max(0, Math.min(1, phoneMicConfig.musicVolume / 100));
+  }
+  clearTimeout(phoneMicIdleTimer);
+  phoneMicIdleTimer = setTimeout(() => {
+    phoneMicDucked = false;
+    audioEl.volume = musicVolumeWithoutPhoneMic();
+  }, PHONE_MIC_IDLE_MS);
+}
+
+function startPhoneMicPlayback() {
+  if (phoneMicWs) return;
+
+  // 16kHz context: matches the incoming stream, so no resampling is needed.
+  phoneMicCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+  phoneMicCtx.resume().catch(() => {});
+  phoneMicNode = phoneMicCtx.createScriptProcessor(1024, 1, 1);
+
+  phoneMicNode.onaudioprocess = (event) => {
+    const out = event.outputBuffer.getChannelData(0);
+    // Still filling the jitter buffer (or nothing arriving) — stay silent.
+    if (phoneMicFilling || phoneMicQueued === 0) {
+      out.fill(0);
+      return;
+    }
+    for (let i = 0; i < out.length; i++) {
+      if (phoneMicChunks.length === 0) {
+        out.fill(0, i); // underrun: pad and wait for more audio
+        phoneMicFilling = true;
+        return;
+      }
+      const chunk = phoneMicChunks[0];
+      out[i] = chunk[phoneMicReadOffset++];
+      phoneMicQueued--;
+      if (phoneMicReadOffset >= chunk.length) {
+        phoneMicChunks.shift();
+        phoneMicReadOffset = 0;
+      }
+    }
+  };
+
+  phoneMicNode.connect(phoneMicCtx.destination);
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  phoneMicWs = new WebSocket(`${proto}://${location.host}/ws/micmix`);
+  phoneMicWs.binaryType = 'arraybuffer';
+  phoneMicWs.onmessage = (evt) => {
+    if (typeof evt.data === 'string') return;
+    const pcm = new Int16Array(evt.data);
+    const samples = new Float32Array(pcm.length);
+    for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 32768;
+    phoneMicChunks.push(samples);
+    phoneMicQueued += samples.length;
+    if (phoneMicFilling && phoneMicQueued >= PHONE_MIC_PREBUFFER_SAMPLES) {
+      phoneMicFilling = false;
+    }
+    duckForPhoneMic();
+  };
+  phoneMicWs.onclose = () => { phoneMicWs = null; };
+}
+
+function stopPhoneMicPlayback() {
+  clearTimeout(phoneMicIdleTimer);
+  if (phoneMicWs) {
+    phoneMicWs.onclose = null;
+    if (phoneMicWs.readyState === WebSocket.OPEN) phoneMicWs.close();
+    phoneMicWs = null;
+  }
+  try { phoneMicNode?.disconnect(); } catch {}
+  try { phoneMicCtx?.close(); } catch {}
+  phoneMicNode = null;
+  phoneMicCtx = null;
+  phoneMicChunks = [];
+  phoneMicQueued = 0;
+  phoneMicReadOffset = 0;
+  phoneMicFilling = true;
+  if (phoneMicDucked) {
+    phoneMicDucked = false;
+    audioEl.volume = musicVolumeWithoutPhoneMic();
+  }
+}
+
+// Only listen while it makes sense: Karaoke mode, feature switched on.
+function syncPhoneMicPlayback() {
+  if (currentMode === 'karaoke' && phoneMicConfig.enabled) startPhoneMicPlayback();
+  else stopPhoneMicPlayback();
 }
 
 let lastAutoPlayedSongId = null;
@@ -1001,7 +1121,10 @@ function connectRoom() {
   roomWs.onmessage = (evt) => {
     const data = JSON.parse(evt.data);
     if (data.type === 'roomState') {
-      applyMode(data.mode);
+      // The global switch can be flipped from Configuración mid-session, so
+      // take it from the broadcast rather than only the initial settings fetch.
+      if (data.phoneMicEnabled !== undefined) phoneMicConfig.enabled = data.phoneMicEnabled;
+      applyMode(data.mode); // calls syncPhoneMicPlayback()
       latestUsers = data.users;
       latestQueue = data.queue;
       renderUsers(data.users);
@@ -1086,6 +1209,7 @@ function applyMode(mode) {
     modeChip.classList.add('hidden');
   }
   if (next !== 'karaoke') stopMicMonitor(); // free the mic when leaving Karaoke
+  syncPhoneMicPlayback();
 }
 
 function sendMode(mode) {

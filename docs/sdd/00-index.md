@@ -6,7 +6,7 @@ Orden de lectura sugerido:
 
 1. [01-overview.md](01-overview.md) — Qué es PitchParty, decisiones de producto, capacidad/roles, qué queda fuera de alcance.
 2. [02-architecture.md](02-architecture.md) — Arquitectura del proceso único Node.js, mapa de archivos del server y del cliente, stack técnico.
-3. [03-protocol.md](03-protocol.md) — Contrato real de la API HTTP y de los dos WebSockets (`/ws/room`, `/ws/sing/:songId`): forma exacta de cada mensaje.
+3. [03-protocol.md](03-protocol.md) — Contrato real de la API HTTP y de los WebSockets (`/ws/room`, `/ws/sing/:songId`, y el par de micrófono por celular `/ws/mic/:userId` + `/ws/micmix`): forma exacta de cada mensaje.
 4. [04-data-model.md](04-data-model.md) — Esquema SQLite, `config.json`/`settings.json`, y el modelo en memoria de la sala (`Room`).
 5. [05-status-roadmap.md](05-status-roadmap.md) — Qué fases están completas, qué cambió respecto al plan original, y qué queda pendiente/fuera de alcance.
 6. [06-acceptance.md](06-acceptance.md) — Criterios de aceptación numerados y verificables, con qué test automatizado cubre cada uno (o si solo se verifica a mano).

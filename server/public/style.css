@@ -545,6 +545,19 @@ html, body {
   flex: 1;
   font-size: 20px;
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Once joined, the name in the header is the rename control (see
+   applyDisplayName in join.js) — hint that it's tappable. */
+.join-header h1.renameable {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.join-header h1.renameable:active {
+  opacity: 0.6;
 }
 
 .avatar {
@@ -1327,6 +1340,17 @@ html, body {
   font-weight: 700;
 }
 .phone-duet-toggle.hidden { display: none; }
+
+/* ---- Karaoke: usar el celular como micrófono (opt-in, apagado por defecto) ---- */
+.phone-mic-toggle {
+  font-weight: 700;
+}
+.phone-mic-toggle.on {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border-color: #ef4444 !important;
+  color: #ef4444 !important;
+}
+.phone-mic-toggle.hidden { display: none; }
 
 /* ---- Karaoke: cartel "Ahora canta X" antes de cada turno ---- */
 .karaoke-announce {

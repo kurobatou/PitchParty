@@ -55,6 +55,7 @@
       <p class="status-line" id="sing-status">Esperando...</p>
       <p class="song-info hidden" id="sing-song-info"></p>
       <button id="phone-duet-toggle" class="phone-duet-toggle hidden" type="button"></button>
+      <button id="phone-mic-toggle" class="phone-mic-toggle hidden" type="button"></button>
       <button id="start-mic-btn" disabled>🎤 Empezar a cantar</button>
       <button id="stop-mic-btn" disabled>■ Detener</button>
 
@@ -91,6 +92,18 @@
     <div id="step-guest" class="hidden">
       <p class="status-line">Estás conectado como invitado. Vas a ver tu estado reflejado en la pantalla principal.</p>
       <button id="become-singer-btn" type="button">🎙️ Quiero cantar</button>
+    </div>
+  </div>
+
+  <div id="rename-modal-overlay" class="mic-modal-overlay hidden">
+    <div class="mic-modal">
+      <h3>✏️ Cambiar mi nombre</h3>
+      <label class="mic-modal-label">Así te van a ver en la pantalla</label>
+      <input id="rename-input" type="text" placeholder="Tu nombre" maxlength="24" />
+      <div class="mic-modal-actions">
+        <button type="button" id="rename-cancel-btn">Cancelar</button>
+        <button type="button" id="rename-save-btn" class="primary-btn">Guardar</button>
+      </div>
     </div>
   </div>
 

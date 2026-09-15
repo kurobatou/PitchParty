@@ -33,6 +33,10 @@ export function loadSettings(defaults) {
       // Karaoke mic monitor: play a mic on THIS machine through the speakers
       // while a song plays, ducking the music to `musicVolume` (0-100).
       micMonitor: normalizeMicMonitor(parsed.micMonitor),
+      // Karaoke: let a phone act as a wireless mic — its audio is relayed to
+      // the Sala and played through the speakers, ducking the music to
+      // `musicVolume` (0-100). Off by default; enabled here for the whole room.
+      phoneMic: normalizePhoneMic(parsed.phoneMic),
     };
   }
   return {
@@ -43,6 +47,15 @@ export function loadSettings(defaults) {
     acmeEmail: null,
     localMics: [],
     micMonitor: normalizeMicMonitor(null),
+    phoneMic: normalizePhoneMic(null),
+  };
+}
+
+export function normalizePhoneMic(m) {
+  const vol = Number(m?.musicVolume);
+  return {
+    enabled: Boolean(m?.enabled),
+    musicVolume: Number.isFinite(vol) ? Math.max(0, Math.min(100, vol)) : 70,
   };
 }
 

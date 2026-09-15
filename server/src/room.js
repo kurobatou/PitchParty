@@ -24,6 +24,7 @@ export class Room {
     this.nowPlaying = null; // { songId, songTitle } — drives Sala auto-playback
     this.disconnectTimers = new Map(); // id -> Timeout, pending removal after grace period
     this.mode = null; // 'karaoke' | 'ultrastar' | null — chosen once per Sala session on the landing
+    this.phoneMicEnabled = false; // global switch: phones may be used as wireless mics (Karaoke)
   }
 
   setLowLatencyMode(enabled) {
@@ -33,6 +34,19 @@ export class Room {
   // The pantalla principal picks the session mode on the landing screen. null
   // means "not chosen yet" → phones and the Sala show the mode picker. Only
   // the two known modes (or a reset to null) are accepted.
+  // Whether phones may be used as wireless mics (global switch from the
+  // settings UI). Broadcast in roomState so phones know to offer the button.
+  setPhoneMicEnabled(enabled) {
+    this.phoneMicEnabled = Boolean(enabled);
+  }
+
+  // The rule that keeps a phone from talking over the room: audio is relayed
+  // only while the feature is on AND that phone owns the current turn.
+  // Checked per audio frame, so it follows the turn as it changes.
+  canRelayMic(userId) {
+    return this.phoneMicEnabled && this.nowPlaying?.userId === userId;
+  }
+
   setMode(mode) {
     this.mode = mode === 'karaoke' || mode === 'ultrastar' ? mode : null;
   }
@@ -53,6 +67,17 @@ export class Room {
       connected: true,
     });
     return id;
+  }
+
+  // Renames a user in place. Keeps their queue spot and turn state — only
+  // the display name changes. Falls back to the current name when the new
+  // one is blank, so nobody can end up nameless.
+  setNickname(id, nickname) {
+    const user = this.users.get(id);
+    if (!user) return null;
+    const clean = String(nickname ?? '').trim().slice(0, 24);
+    if (clean) user.nickname = clean;
+    return user.nickname;
   }
 
   update(id, patch) {
@@ -211,6 +236,7 @@ export class Room {
       lowLatencyMode: this.lowLatencyMode,
       nowPlaying: this.nowPlaying,
       mode: this.mode,
+      phoneMicEnabled: this.phoneMicEnabled,
     });
   }
 }

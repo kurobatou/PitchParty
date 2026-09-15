@@ -151,6 +151,34 @@
     </section>
 
     <section class="settings-card">
+      <h2>Micrófono desde el celular (Karaoke)</h2>
+      <p class="settings-hint">
+        En modo <strong>Karaoke</strong>, permite que quien está cantando use <strong>su celular como
+        micrófono inalámbrico</strong>: la voz viaja por WiFi y sale por los parlantes de este equipo.
+        Cada persona lo activa desde su celular con un botón que viene <strong>apagado</strong>, y solo
+        suena el celular de <strong>quien tiene el turno</strong>.
+        Ojo: se agrega algo de retardo (~0,2–0,3 s por WiFi), la voz va en calidad telefónica (16 kHz)
+        y, si el celular está cerca de los parlantes, puede acoplar (feedback).
+      </p>
+
+      <label class="mic-toggle">
+        <input type="checkbox" id="phonemic-enabled" />
+        <span class="path-text">Permitir usar celulares como micrófono en Karaoke</span>
+      </label>
+
+      <div class="settings-row">
+        <span class="settings-label">Volumen de la música:</span>
+        <input type="range" id="phonemic-volume" min="0" max="100" step="5" />
+        <span id="phonemic-volume-val">70%</span>
+      </div>
+
+      <div class="settings-row">
+        <button id="save-phonemic-btn" type="button" class="primary-btn">Guardar</button>
+        <span id="phonemic-status" class="settings-status"></span>
+      </div>
+    </section>
+
+    <section class="settings-card">
       <h2>Prueba de micrófono</h2>
       <p class="settings-hint">
         Página simple para probar que el micrófono y la puntuación funcionan, sin pasar por la cola de

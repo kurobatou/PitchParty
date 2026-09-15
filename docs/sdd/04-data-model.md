@@ -64,11 +64,12 @@ Solo se lee una vez, al arrancar (`config.js`), como valor de arranque de `libra
   "cloudflareApiToken": null,
   "acmeEmail": null,
   "localMics": [{ "deviceId": "…", "label": "Bluetooth Mic" }],
-  "micMonitor": { "enabled": false, "deviceId": null, "musicVolume": 70 }
+  "micMonitor": { "enabled": false, "deviceId": null, "musicVolume": 70 },
+  "phoneMic": { "enabled": false, "musicVolume": 70 }
 }
 ```
 
-Todos los campos son opcionales salvo `libraryPaths` (si falta, cae al default de `config.json`). `localMics` es la lista de micrófonos físicos **habilitados** para usar desde la Sala (no lleva nombre de cantante — eso se elige por turno en la Sala); el `deviceId` es el que expone `enumerateDevices()`, estable mientras el permiso de mic persista en ese navegador/origen. `micMonitor` controla el monitor de micrófono de la máquina de la Sala (hacer sonar un mic físico por los parlantes mientras corre la canción, bajando la música a `musicVolume`); se normaliza siempre con `normalizeMicMonitor()` (`server/src/settings.js`): `enabled` se castea a booleano, `deviceId` a string-o-`null`, y `musicVolume` se recorta a 0-100 cayendo a `70` si no es un número finito. `cloudflareApiToken` queda **en texto plano en este archivo** — es intencional (no hay otro almacén de secretos en este proyecto) pero vale la pena tenerlo presente si `server/data/` alguna vez se respalda o se comparte.
+Todos los campos son opcionales salvo `libraryPaths` (si falta, cae al default de `config.json`). `localMics` es la lista de micrófonos físicos **habilitados** para usar desde la Sala (no lleva nombre de cantante — eso se elige por turno en la Sala); el `deviceId` es el que expone `enumerateDevices()`, estable mientras el permiso de mic persista en ese navegador/origen. `micMonitor` controla el monitor de micrófono de la máquina de la Sala (hacer sonar un mic físico por los parlantes mientras corre la canción, bajando la música a `musicVolume`); se normaliza siempre con `normalizeMicMonitor()` (`server/src/settings.js`): `enabled` se castea a booleano, `deviceId` a string-o-`null`, y `musicVolume` se recorta a 0-100 cayendo a `70` si no es un número finito. `phoneMic` es el interruptor global de **usar el celular como micrófono inalámbrico** en modo Karaoke (`enabled`), más el volumen al que baja la música mientras suena esa voz (`musicVolume`); se normaliza con `normalizePhoneMic()` (`server/src/settings.js`), con las mismas reglas que `micMonitor`. Ojo con la diferencia: `micMonitor` hace sonar un micrófono **físico conectado a la máquina de la Sala**, mientras que `phoneMic` reproduce audio que llega **por la red desde un celular** (ver los WebSockets de micrófono en [03-protocol.md](03-protocol.md)). Son independientes y pueden estar activos a la vez. Al guardarse, `phoneMic` aplica en caliente (actualiza `Room.phoneMicEnabled` y dispara un `roomState`), a diferencia de la IP o el certificado, que piden reinicio. `cloudflareApiToken` queda **en texto plano en este archivo** — es intencional (no hay otro almacén de secretos en este proyecto) pero vale la pena tenerlo presente si `server/data/` alguna vez se respalda o se comparte.
 
 ## 4.3 Estado de sesión — `Room` (en memoria, `server/src/room.js`)
 
@@ -84,17 +85,20 @@ class Room {
   nowPlaying;            // { userId, songId, songTitle, duetMode } | null
   disconnectTimers;      // Map<userId, Timeout> — cuentas regresivas de DISCONNECT_GRACE_MS
   mode;                  // 'karaoke' | 'ultrastar' | null — modo de sesión, lo fija la Sala
+  phoneMicEnabled;       // boolean — interruptor global de "celular como micrófono" (viene de settings)
 }
 ```
 
 `mode` arranca en `null` (la Sala todavía no eligió; Sala y celulares muestran el selector) y solo la Sala lo cambia vía `setMode` — cualquier valor que no sea `'karaoke'`/`'ultrastar'` lo devuelve a `null`. Viaja en cada `roomState`.
+
+`phoneMicEnabled` no lo fija nadie por WebSocket: es un espejo en memoria de `phoneMic.enabled` de `settings.json`, que `index.js` sincroniza al arrancar y cada vez que se guarda la configuración (`setPhoneMicEnabled()`). Viaja en cada `roomState` para que Sala y celulares sepan si ofrecer el micrófono por celular. El método `canRelayMic(userId)` combina este flag con `nowPlaying.userId` y es **la única** autorización para que el audio de un celular llegue a los parlantes — ver [03-protocol.md](03-protocol.md).
 
 ### `User` (valor de `users.get(id)`)
 
 | Campo | Tipo | Notas |
 |---|---|---|
 | `id` | `string` (UUID) | Generado con `randomUUID()` al `join`. Es el `userId` que viaja en el protocolo (ver [03-protocol.md](03-protocol.md)). |
-| `nickname` | `string` | Elegido por el usuario, o `Invitado-xxxx` si vino vacío. |
+| `nickname` | `string` | Elegido por el usuario, o `Invitado-xxxx` si vino vacío. Se puede cambiar en cualquier momento con `setNickname` (`Room.setNickname()`): se recorta, se limita a 24 caracteres, y si queda vacío se conserva el anterior. El renombrado **no** afecta cola ni estado de turno. |
 | `role` | `"screen" \| "singer" \| "guest" \| "karaoke"` | Se fija en el `join`, salvo que el propio celular se cambie entre `singer`/`guest` con `setRole`. `karaoke` es especial: no viene de un `join` sino de `addKaraokeSinger()` (participante sin celular, `socket: null`, nunca puntúa, se elimina al terminar su turno). |
 | `duetMode` | `"duo" \| "solo" \| null` | Para canciones de dos voces: si la canta entre dos o una sola persona. Lo manda el celular en `chooseSong` o lo cambia después con `setDuetMode`. |
 | `state` | `"connected" \| "queued" \| "called" \| "singing" \| "scored"` | Máquina de estados del turno — ver abajo. |

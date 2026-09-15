@@ -41,6 +41,11 @@ const phoneCountdownNumberEl = document.getElementById('phone-countdown-number')
 const phoneNextUpEl = document.getElementById('phone-next-up');
 const scorePctEl = document.getElementById('score-pct');
 const phoneDuetToggle = document.getElementById('phone-duet-toggle');
+const phoneMicToggle = document.getElementById('phone-mic-toggle');
+const renameOverlay = document.getElementById('rename-modal-overlay');
+const renameInput = document.getElementById('rename-input');
+const renameSaveBtn = document.getElementById('rename-save-btn');
+const renameCancelBtn = document.getElementById('rename-cancel-btn');
 
 const feedbackBtn = document.getElementById('feedback-btn');
 const feedbackOverlay = document.getElementById('feedback-modal-overlay');
@@ -203,6 +208,55 @@ function setAvatar(nickname) {
   avatarEl.classList.remove('hidden');
 }
 
+// Single place that reflects "who am I" in the header: the server is the
+// source of truth (it assigns "Invitado-xxxx" to anyone who joined without
+// typing a name), so the phone shows exactly what the Sala shows.
+function applyDisplayName(nickname) {
+  if (nickname) nicknameEl.value = nickname;
+  const displayName = nickname || nicknameEl.value.trim() || 'Invitado';
+  // The name doubles as the rename control (tap it) — a third header button
+  // would push the title onto three lines on a narrow phone.
+  pageTitleEl.textContent = `${displayName} ✏️`;
+  pageTitleEl.classList.add('renameable');
+  pageTitleEl.title = 'Tocá para cambiar tu nombre';
+  setAvatar(displayName);
+}
+
+// --- Rename: available any time after joining, so entering without a name
+// (or with a typo) isn't a dead end. Keeps the queue spot — the server just
+// swaps the display name on the existing user (see room.setNickname). ---
+function openRenameModal() {
+  renameInput.value = nicknameEl.value.trim();
+  renameOverlay.classList.remove('hidden');
+  renameInput.focus();
+  renameInput.select();
+}
+
+function closeRenameModal() {
+  renameOverlay.classList.add('hidden');
+}
+
+function submitRename() {
+  const nickname = renameInput.value.trim();
+  if (!nickname) return; // blank keeps the current name; nothing to send
+  if (roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'setNickname', nickname }));
+  }
+  closeRenameModal();
+}
+
+pageTitleEl.addEventListener('click', () => {
+  if (pageTitleEl.classList.contains('renameable')) openRenameModal();
+});
+renameCancelBtn.addEventListener('click', closeRenameModal);
+renameSaveBtn.addEventListener('click', submitRename);
+renameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitRename();
+});
+renameOverlay.addEventListener('click', (e) => {
+  if (e.target === renameOverlay) closeRenameModal();
+});
+
 function wsUrl(path) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   return `${proto}://${location.host}${path}`;
@@ -280,12 +334,9 @@ function handleRoomMessage(evt) {
   if (data.type === 'welcome') {
     userId = data.userId;
     role = data.role || role;
-    if (data.nickname) nicknameEl.value = data.nickname;
+    applyDisplayName(data.nickname);
     saveSession();
     stepJoin.classList.add('hidden');
-    const displayName = data.nickname || nicknameEl.value.trim() || 'Invitado';
-    pageTitleEl.textContent = `Conectado como ${displayName}`;
-    setAvatar(displayName);
     advanceRowEl.classList.remove('hidden');
     if (!data.rejoined) onJoined();
     // If rejoined, the step (stepSong vs. stepSing vs. stepGuest) is
@@ -297,6 +348,8 @@ function handleRoomMessage(evt) {
     // reclaim, so start over with a normal join.
     clearSession();
     pageTitleEl.textContent = '🎤 PitchParty';
+    pageTitleEl.classList.remove('renameable');
+    avatarEl.classList.add('hidden');
     advanceRowEl.classList.add('hidden');
     stepJoin.classList.remove('hidden');
     stepSong.classList.add('hidden');
@@ -305,6 +358,9 @@ function handleRoomMessage(evt) {
   } else if (data.type === 'pong') {
     const rtt = performance.now() - data.t0;
     roomWs.send(JSON.stringify({ type: 'reportLatency', ms: Math.round(rtt) }));
+  } else if (data.type === 'nicknameChanged') {
+    applyDisplayName(data.nickname);
+    saveSession();
   } else if (data.type === 'roomState') {
     onRoomState(data);
   } else if (data.type === 'karaokeProgress') {
@@ -518,6 +574,114 @@ phoneDuetToggle.addEventListener('click', () => {
   }
 });
 
+// --- Karaoke: use this phone as a wireless mic. Opt-in and OFF by default —
+// we only capture during this singer's own turn, and the server drops
+// anything sent outside it (see /ws/mic in index.js). ---
+let phoneMicEnabled = false; // global switch, from roomState
+let phoneMicArmed = false; // this singer's choice, remembered across turns
+let phoneMicWs = null;
+let phoneMicStream = null;
+let phoneMicCtx = null;
+let phoneMicSource = null;
+let phoneMicProcessor = null;
+let phoneMicStarting = false;
+
+function updatePhoneMicToggleUI() {
+  const inTurnFlow = !stepSing.classList.contains('hidden');
+  if (currentMode !== 'karaoke' || !phoneMicEnabled || !inTurnFlow) {
+    phoneMicToggle.classList.add('hidden');
+    return;
+  }
+  phoneMicToggle.classList.remove('hidden');
+  phoneMicToggle.classList.toggle('on', phoneMicArmed);
+  phoneMicToggle.textContent = phoneMicArmed
+    ? '🔴 Micrófono ON — tocá para apagar'
+    : '🎤 ¿Usar tu celular como micrófono?';
+}
+
+phoneMicToggle.addEventListener('click', async () => {
+  phoneMicArmed = !phoneMicArmed;
+  updatePhoneMicToggleUI();
+  if (phoneMicArmed && karaokeSingingNow) {
+    // Turning it on mid-turn: start streaming right away.
+    await startPhoneMic().catch((err) => {
+      console.error(err);
+      phoneMicArmed = false;
+      updatePhoneMicToggleUI();
+      singStatus.textContent = `No se pudo usar el micrófono: ${err.message}`;
+    });
+  } else if (phoneMicArmed) {
+    // Armed while still waiting: grab the OS permission NOW, inside this tap.
+    // When the turn starts, capture begins from a WebSocket message with no
+    // user gesture behind it — iOS refuses getUserMedia in that case unless
+    // permission was already granted.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      console.warn('phone mic permission denied', err);
+      phoneMicArmed = false;
+      updatePhoneMicToggleUI();
+      singStatus.textContent = 'Necesitamos permiso de micrófono para usar tu celular como micro.';
+    }
+  } else {
+    stopPhoneMic();
+  }
+});
+
+async function startPhoneMic() {
+  if (phoneMicWs || phoneMicStarting) return;
+  phoneMicStarting = true;
+  try {
+    // Raw audio (no AGC/noise suppression/echo cancellation) so singing
+    // through the speakers sounds natural — same choice as the Sala's
+    // local mic monitor in app.js.
+    phoneMicStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+  } finally {
+    phoneMicStarting = false;
+  }
+
+  phoneMicCtx = new (window.AudioContext || window.webkitAudioContext)();
+  phoneMicSource = phoneMicCtx.createMediaStreamSource(phoneMicStream);
+  // Small buffer keeps the added latency low; the Sala re-buffers on its end.
+  phoneMicProcessor = phoneMicCtx.createScriptProcessor(2048, 1, 1);
+
+  phoneMicWs = new WebSocket(wsUrl(`/ws/mic/${userId}`));
+  phoneMicWs.binaryType = 'arraybuffer';
+
+  phoneMicProcessor.onaudioprocess = (event) => {
+    if (!phoneMicWs || phoneMicWs.readyState !== WebSocket.OPEN) return;
+    const input = event.inputBuffer.getChannelData(0);
+    const downsampled = downsampleTo16k(input, phoneMicCtx.sampleRate);
+    phoneMicWs.send(floatTo16BitPCM(downsampled).buffer);
+  };
+
+  // The processor needs a path to the destination to run, but we must not
+  // hear ourselves locally — route through a muted gain node.
+  const mute = phoneMicCtx.createGain();
+  mute.gain.value = 0;
+  phoneMicSource.connect(phoneMicProcessor);
+  phoneMicProcessor.connect(mute);
+  mute.connect(phoneMicCtx.destination);
+}
+
+function stopPhoneMic() {
+  if (phoneMicWs) {
+    if (phoneMicWs.readyState === WebSocket.OPEN) phoneMicWs.close();
+    phoneMicWs = null;
+  }
+  try { phoneMicProcessor?.disconnect(); } catch {}
+  try { phoneMicSource?.disconnect(); } catch {}
+  try { phoneMicStream?.getTracks().forEach((t) => t.stop()); } catch {}
+  try { phoneMicCtx?.close(); } catch {}
+  phoneMicProcessor = null;
+  phoneMicSource = null;
+  phoneMicStream = null;
+  phoneMicCtx = null;
+}
+
 // --- Karaoke lyric sync: drive the lyric preview from the Sala's broadcast
 // position, interpolating between updates for smoothness. ---
 function onKaraokeProgress(data) {
@@ -626,6 +790,20 @@ function onRoomState(data) {
 
   updateDuetToggleUI(self.state);
   karaokeSingingNow = currentMode === 'karaoke' && (self.state === 'called' || self.state === 'singing');
+
+  // Phone-as-mic: only capture during our own turn, and only if the singer
+  // armed it. Outside the turn we release the mic entirely.
+  phoneMicEnabled = Boolean(data.phoneMicEnabled);
+  updatePhoneMicToggleUI();
+  if (phoneMicEnabled && phoneMicArmed && karaokeSingingNow) {
+    startPhoneMic().catch((err) => {
+      console.error('phone mic failed', err);
+      phoneMicArmed = false;
+      updatePhoneMicToggleUI();
+    });
+  } else if (!karaokeSingingNow && (phoneMicWs || phoneMicCtx)) {
+    stopPhoneMic();
+  }
 
   if (self.state === 'called' && previousSelfState !== 'called') {
     playCallAlert();

@@ -15,7 +15,7 @@ import { readUsdxTxtFile } from './txtEncoding.js';
 import { Room } from './room.js';
 import { getOrCreateCert } from './tls.js';
 import { ensureLetsEncryptCert } from './certManager.js';
-import { loadSettings, saveSettings, normalizeMicMonitor } from './settings.js';
+import { loadSettings, saveSettings, normalizeMicMonitor, normalizePhoneMic } from './settings.js';
 import { detectPitch } from './pitch.js';
 import { ScoringSession, notesFromSongPayload } from './scoring.js';
 import { detectLanIp } from './netinfo.js';
@@ -76,6 +76,7 @@ const app = Fastify({
 });
 const db = openDb();
 const room = new Room();
+room.setPhoneMicEnabled(settings.phoneMic.enabled);
 
 // Lets the Sala tell the server "this turn's playback ended" (see the
 // 'endTurn' message on /ws/room) so the matching /ws/sing session finishes
@@ -212,6 +213,7 @@ app.get('/api/settings', async () => {
     certInfo,
     localMics: settings.localMics,
     micMonitor: settings.micMonitor,
+    phoneMic: settings.phoneMic,
   };
 });
 
@@ -258,8 +260,19 @@ app.put('/api/settings', async (request, reply) => {
     next.micMonitor = normalizeMicMonitor(body.micMonitor);
   }
 
+  if (body.phoneMic !== undefined) {
+    next.phoneMic = normalizePhoneMic(body.phoneMic);
+  }
+
   settings = next;
   saveSettings(settings);
+
+  // Takes effect immediately: phones show/hide their "use as mic" button off
+  // the roomState broadcast, no restart needed.
+  if (body.phoneMic !== undefined) {
+    room.setPhoneMicEnabled(settings.phoneMic.enabled);
+    room.broadcastState();
+  }
 
   const result = body.libraryPaths !== undefined
     ? reindexLibrary(db, currentLibraryPaths(), app.log)
@@ -300,6 +313,8 @@ app.put('/api/settings', async (request, reply) => {
     certRestartRequired: certAttempt?.ok === true,
     reindex: result,
     localMics: settings.localMics,
+    micMonitor: settings.micMonitor,
+    phoneMic: settings.phoneMic,
   };
 });
 
@@ -374,7 +389,14 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
 
     if (msg.type === 'join') {
       userId = room.join(socket, { nickname: msg.nickname, role: msg.role });
-      socket.send(JSON.stringify({ type: 'welcome', userId }));
+      // Echo the nickname back: someone who joined without typing one gets
+      // the server-assigned "Invitado-xxxx", and the phone should show the
+      // same name the Sala does instead of a generic "Invitado".
+      socket.send(JSON.stringify({
+        type: 'welcome',
+        userId,
+        nickname: room.users.get(userId)?.nickname,
+      }));
       room.broadcastState();
       return;
     }
@@ -412,6 +434,16 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
         duetMode,
       });
       if (song) room.enqueue(userId);
+      room.broadcastState();
+      return;
+    }
+
+    // Renaming mid-session: someone who joined without typing a name (or
+    // typed the wrong one) fixes it without losing their queue spot.
+    if (msg.type === 'setNickname') {
+      const nickname = room.setNickname(userId, msg.nickname);
+      if (nickname === null) return;
+      socket.send(JSON.stringify({ type: 'nicknameChanged', nickname }));
       room.broadcastState();
       return;
     }
@@ -547,6 +579,35 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
       room.broadcastState();
     });
     room.broadcastState();
+  });
+});
+
+// --- Karaoke "phone as a wireless mic": a relay from the singer's phone to
+// the Sala, which plays it through the speakers. Deliberately dumb — the
+// server never decodes the audio, it just forwards raw 16kHz PCM frames.
+//
+// Only ONE phone can be heard at a time: the one whose turn it is. That's
+// enforced here rather than on the phone, so a stale or malicious client
+// can't talk over the current singer.
+const micMixListeners = new Set();
+
+app.get('/ws/micmix', { websocket: true }, (socket) => {
+  micMixListeners.add(socket);
+  socket.on('close', () => micMixListeners.delete(socket));
+});
+
+app.get('/ws/mic/:userId', { websocket: true }, (socket, req) => {
+  const userId = req.params.userId;
+
+  socket.on('message', (data, isBinary) => {
+    if (!isBinary) return;
+    // Re-checked per frame (not just on connect): the turn can end, or the
+    // feature be switched off, while this socket is still open.
+    if (!room.canRelayMic(userId)) return;
+
+    for (const listener of micMixListeners) {
+      if (listener.readyState === listener.OPEN) listener.send(data);
+    }
   });
 });
 
