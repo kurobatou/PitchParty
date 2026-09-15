@@ -102,7 +102,7 @@ npm ci
 npm run ci     # corre los tres de abajo en orden
 ```
 
-- `npm test` — 51 tests unitarios de la lógica pura (parser USDX incluidos duetos, scoring, detección de tono, sala/cola/ranking/modos, validación de mensajes, normalización de ajustes) con el runner nativo de Node (`node --test`). Qué criterio de aceptación cubre cada uno está en [docs/sdd/06-acceptance.md](docs/sdd/06-acceptance.md).
+- `npm test` — 69 tests unitarios de la lógica pura (parser USDX incluidos duetos, scoring, detección de tono, sala/cola/ranking/modos/duetos con dos celulares, validación de mensajes, normalización de ajustes) con el runner nativo de Node (`node --test`). Qué criterio de aceptación cubre cada uno está en [docs/sdd/06-acceptance.md](docs/sdd/06-acceptance.md).
 - `npm run check` — chequeo de sintaxis (`node --check`) de **todo** el JS, incluido el del navegador (`app.js`, `join.js`, ...) que no se puede unit-testear sin un navegador real.
 - `npm run lint` — ESLint (config flat) sobre server + frontend.
 

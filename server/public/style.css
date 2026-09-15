@@ -1341,6 +1341,37 @@ html, body {
 }
 .phone-duet-toggle.hidden { display: none; }
 
+/* ---- Dueto con dos celulares: estado, invitación y voz propia ---- */
+
+/* Vive fuera de los pasos: las novedades del dueto llegan estés donde estés. */
+.duet-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.duet-banner.hidden { display: none; }
+
+.duet-invite-list { max-height: 220px; overflow-y: auto; }
+.duet-invite-list:empty { display: none; }
+
+/* La letra se ve completa en los dos celulares —hace falta para entrar a
+   tiempo cuando las voces se alternan— pero la voz propia va al frente y la
+   ajena se atenúa. Las líneas de "ambos" (voz 3) nunca se atenúan: esas se
+   cantan juntas. */
+:root[data-duet][data-my-voice="1"] .lyrics-preview [data-player="2"],
+:root[data-duet][data-my-voice="2"] .lyrics-preview [data-player="1"] {
+  opacity: 0.4;
+}
+:root[data-duet][data-my-voice="1"] .lyrics-preview [data-player="1"],
+:root[data-duet][data-my-voice="2"] .lyrics-preview [data-player="2"] {
+  font-weight: 800;
+}
+
 /* ---- Karaoke: usar el celular como micrófono (opt-in, apagado por defecto) ---- */
 .phone-mic-toggle {
   font-weight: 700;

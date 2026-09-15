@@ -719,13 +719,19 @@ function renderUsers(users) {
   }).join('');
 }
 
+// A duet sung from two phones is one entry with two names — it takes one
+// spot in the queue, not two.
+function queueSingerLabel(entry) {
+  return entry.partnerNickname ? `${entry.nickname} 🎭 ${entry.partnerNickname}` : entry.nickname;
+}
+
 function renderQueue(queue) {
   const list = document.getElementById('queue-list');
   list.innerHTML = queue.length === 0
     ? '<li style="color:#9c9db3">Nadie en cola</li>'
     : queue.map((q) => `
       <li>
-        ${escapeHtml(q.nickname)}
+        ${escapeHtml(queueSingerLabel(q))}
         ${q.songTitle ? `<span style="color:#9c9db3"> — ${escapeHtml(q.songTitle)}</span>` : ''}
       </li>
     `).join('');
@@ -884,25 +890,63 @@ function stopMicMonitor() {
   try { m.ctx?.close(); } catch {}
 }
 
-// --- Karaoke "phone as a wireless mic": play the singer's phone audio through
+// --- Karaoke "phone as a wireless mic": play the singers' phone audio through
 // the Sala's speakers. The server relays raw 16kHz PCM (see /ws/micmix) and
-// only ever from the phone whose turn it is, so here we just buffer and play.
+// only ever from the phones taking the current turn, so here we just buffer,
+// mix and play.
 //
-// A small jitter buffer absorbs WiFi hiccups: we hold ~100ms before starting
-// playback, then feed the audio graph from the queue. On underrun we output
-// silence and re-buffer instead of clicking.
+// Each frame arrives with a 2-byte header whose first byte is the voice
+// (1 = the singer who owns the turn, 2 = their duet partner). Two bytes, not
+// one, so the PCM16 behind it stays 2-byte aligned and can be read as an
+// Int16Array view with no copy.
+//
+// Each voice gets its OWN jitter buffer and they're summed sample by sample.
+// Keeping them separate is what lets one voice drop out — a phone that
+// stutters, or a partner who never armed their mic — without taking the
+// other one down with it.
 const PHONE_MIC_PREBUFFER_SAMPLES = 1600; // ~100ms at 16kHz
-const PHONE_MIC_IDLE_MS = 600; // no frames for this long = singer stopped
+const PHONE_MIC_IDLE_MS = 600; // no frames for this long = singers stopped
+const PHONE_MIC_HEADER_BYTES = 2; // [voice, padding] — must match /ws/mic in index.js
+const PHONE_MIC_VOICES = [1, 2];
 
 let phoneMicWs = null;
 let phoneMicCtx = null;
 let phoneMicNode = null;
-let phoneMicChunks = []; // pending Float32Array chunks
-let phoneMicQueued = 0; // samples still unplayed
-let phoneMicReadOffset = 0; // read position inside chunks[0]
-let phoneMicFilling = true; // true while waiting for the prebuffer
 let phoneMicDucked = false;
 let phoneMicIdleTimer = null;
+
+// Per voice: { chunks (pending Float32Arrays), queued (samples unplayed),
+// readOffset (position inside chunks[0]), filling (waiting for prebuffer) }.
+let voiceBuffers = newVoiceBuffers();
+
+function newVoiceBuffers() {
+  return {
+    1: { chunks: [], queued: 0, readOffset: 0, filling: true },
+    2: { chunks: [], queued: 0, readOffset: 0, filling: true },
+  };
+}
+
+// Adds one voice's samples into `out`. Never writes silence over what's
+// already there: whatever this voice can't supply is simply the other one's
+// audio, untouched.
+function mixVoiceInto(out, voice) {
+  const buf = voiceBuffers[voice];
+  if (!buf || buf.filling || buf.queued === 0) return;
+
+  for (let i = 0; i < out.length; i++) {
+    if (buf.chunks.length === 0) {
+      buf.filling = true; // underrun: go quiet and re-buffer instead of clicking
+      return;
+    }
+    const chunk = buf.chunks[0];
+    out[i] += chunk[buf.readOffset++];
+    buf.queued--;
+    if (buf.readOffset >= chunk.length) {
+      buf.chunks.shift();
+      buf.readOffset = 0;
+    }
+  }
+}
 
 // What the music volume should be when the phone mic is NOT sounding — the
 // existing local mic monitor may already be ducking it.
@@ -935,25 +979,8 @@ function startPhoneMicPlayback() {
 
   phoneMicNode.onaudioprocess = (event) => {
     const out = event.outputBuffer.getChannelData(0);
-    // Still filling the jitter buffer (or nothing arriving) — stay silent.
-    if (phoneMicFilling || phoneMicQueued === 0) {
-      out.fill(0);
-      return;
-    }
-    for (let i = 0; i < out.length; i++) {
-      if (phoneMicChunks.length === 0) {
-        out.fill(0, i); // underrun: pad and wait for more audio
-        phoneMicFilling = true;
-        return;
-      }
-      const chunk = phoneMicChunks[0];
-      out[i] = chunk[phoneMicReadOffset++];
-      phoneMicQueued--;
-      if (phoneMicReadOffset >= chunk.length) {
-        phoneMicChunks.shift();
-        phoneMicReadOffset = 0;
-      }
-    }
+    out.fill(0);
+    for (const voice of PHONE_MIC_VOICES) mixVoiceInto(out, voice);
   };
 
   phoneMicNode.connect(phoneMicCtx.destination);
@@ -963,14 +990,20 @@ function startPhoneMicPlayback() {
   phoneMicWs.binaryType = 'arraybuffer';
   phoneMicWs.onmessage = (evt) => {
     if (typeof evt.data === 'string') return;
-    const pcm = new Int16Array(evt.data);
+    if (evt.data.byteLength <= PHONE_MIC_HEADER_BYTES) return;
+
+    const voice = new Uint8Array(evt.data, 0, 1)[0];
+    const buf = voiceBuffers[voice];
+    if (!buf) return; // unknown voice: drop it rather than mixing it blind
+
+    // The header is 2 bytes, so the PCM behind it is still 2-byte aligned —
+    // this view costs nothing, no copy per frame.
+    const pcm = new Int16Array(evt.data, PHONE_MIC_HEADER_BYTES);
     const samples = new Float32Array(pcm.length);
     for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 32768;
-    phoneMicChunks.push(samples);
-    phoneMicQueued += samples.length;
-    if (phoneMicFilling && phoneMicQueued >= PHONE_MIC_PREBUFFER_SAMPLES) {
-      phoneMicFilling = false;
-    }
+    buf.chunks.push(samples);
+    buf.queued += samples.length;
+    if (buf.filling && buf.queued >= PHONE_MIC_PREBUFFER_SAMPLES) buf.filling = false;
     duckForPhoneMic();
   };
   phoneMicWs.onclose = () => { phoneMicWs = null; };
@@ -987,10 +1020,7 @@ function stopPhoneMicPlayback() {
   try { phoneMicCtx?.close(); } catch {}
   phoneMicNode = null;
   phoneMicCtx = null;
-  phoneMicChunks = [];
-  phoneMicQueued = 0;
-  phoneMicReadOffset = 0;
-  phoneMicFilling = true;
+  voiceBuffers = newVoiceBuffers();
   if (phoneMicDucked) {
     phoneMicDucked = false;
     audioEl.volume = musicVolumeWithoutPhoneMic();
@@ -1020,10 +1050,13 @@ function handleNowPlaying(nowPlaying) {
   currentTurnNickname = singer?.nickname ?? nowPlaying.nickname ?? null;
   hideResults(); // a new turn supersedes any lingering results screen
 
-  // Karaoke: no scoring, no mic, no countdown. Announce the participant, then
-  // just play the song.
+  // Karaoke: no scoring, no mic, no countdown. Announce the participant (both
+  // of them, when it's a duet from two phones), then just play the song.
   if (currentMode === 'karaoke') {
-    showKaraokeAnnounce(currentTurnNickname, nowPlaying.songTitle, () => {
+    const announceName = nowPlaying.partnerNickname
+      ? `${currentTurnNickname} 🎭 ${nowPlaying.partnerNickname}`
+      : currentTurnNickname;
+    showKaraokeAnnounce(announceName, nowPlaying.songTitle, () => {
       openSong(nowPlaying.songId, { withCountdown: false, duetMode: nowPlaying.duetMode });
     });
     return;

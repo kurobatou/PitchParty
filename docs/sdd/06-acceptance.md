@@ -65,7 +65,7 @@ La columna **Verificación** dice cómo se comprueba hoy:
 | 69 | Dado un `setNickname` vacío o solo con espacios, cuando se aplica, entonces se conserva el nombre anterior (nadie queda sin nombre). | `test:room` |
 | 70 | Dado un `setNickname` de un `userId` inexistente, cuando se procesa, entonces no rompe ni crea usuarios (devuelve `null`). | `test:room` |
 | 71 | Dado un usuario ya unido, cuando toca su propio nombre en el encabezado del celular, entonces se abre el modal de renombrado con el nombre actual precargado. | manual (navegador) |
-| 72 | Dado un `join` con un nombre con espacios sobrantes o más de 24 caracteres, cuando se crea el usuario, entonces se aplican las **mismas** reglas que en `setNickname` — el `maxlength` del formulario no se toma como garantía. | `test:room` |
+| 84 | Dado un `join` con un nombre con espacios sobrantes o más de 24 caracteres, cuando se crea el usuario, entonces se aplican las **mismas** reglas que en `setNickname` — el `maxlength` del formulario no se toma como garantía. | `test:room` |
 
 ## 6.4 Modos, duetos y participantes sin celular
 
@@ -78,6 +78,8 @@ La columna **Verificación** dice cómo se comprueba hoy:
 | 35 | Dado un participante de rol `karaoke`, cuando la Sala manda `endTurn` para él, entonces se lo elimina de la sala (no puntúa ni queda en la lista). | manual (Mac) |
 | 36 | Dado el modo Karaoke, cuando la Sala emite `karaokeProgress`, entonces todos los celulares conectados reciben `songId` y `positionMs` para sincronizar la letra. | manual (Mac) |
 | 37 | Dada una canción de dueto, cuando el celular elige `duo` o `solo` (al elegir canción o después con `setDuetMode`), entonces esa elección viaja en `nowPlaying` y la Sala reproduce en consecuencia. | manual (Mac) |
+
+> `duo` con **dos celulares** (invitar a alguien a la voz 2) es una capacidad aparte: ver [6.9](#69-dueto-con-dos-celulares-modo-karaoke).
 
 ## 6.5 Micrófono desde el celular (modo Karaoke)
 
@@ -140,3 +142,43 @@ Nada de esto tiene test automatizado y probablemente nunca lo tenga: necesita mi
 | 55 | Dado un celular que se bloquea a mitad de canción y vuelve, cuando reconecta dentro de 90 s, entonces recupera su sesión sin volver a unirse. | manual (Mac) |
 | 56 | Dada una latencia reportada ≥150 ms (o ≥300 ms), cuando la Sala la muestra, entonces avisa "algo de latencia" (o "latencia alta") en vez de fallar en silencio. | manual (Mac) |
 | 57 | Dado el monitor de micrófono activado, cuando corre una canción, entonces el micrófono de la máquina de la Sala suena por los parlantes y la música baja a `musicVolume`. | manual (Mac) |
+
+## 6.9 Dueto con dos celulares (modo Karaoke)
+
+Cada persona canta una voz desde **su propio** celular, en **un solo** turno. Solo en modo Karaoke: en UltraStar habría que partir la puntuación por voz, y eso es otra feature.
+
+### Invitación
+
+| # | Criterio | Verificación |
+|---|---|---|
+| 85 | Dada una canción de dueto, cuando se elige, entonces se pregunta 🙂 Solista / 🎭 Dúo igual que siempre; y **solo** si se elige Dúo aparece la opción de invitar a alguien conectado **o de seguir sin invitar**. | manual (navegador) |
+| 86 | Dada esa lista, cuando se arma, entonces no incluye a la Sala (`role: screen`), ni a participantes de rol `karaoke` (no tienen socket), ni a quien está invitando, ni a quien ya tiene compañero o está cantando. El servidor **revalida todo** (`Room.inviteDuetPartner`): la lista del celular es una comodidad, no la regla. | `test:room` + manual (navegador) |
+| 87 | Dado que no se invitó a nadie al elegir la canción, cuando se sigue esperando en la cola, entonces hay un botón para invitar más tarde — invitar es opcional **y reversible**, también después de un "no". | manual (navegador) |
+| 88 | Dada una invitación enviada, cuando llega al invitado, entonces ve quién lo invita y a qué canción, y puede aceptar o rechazar. | manual (navegador) |
+| 89 | Dado un invitado que ya está en la cola con su propia canción, cuando se le muestra la invitación, entonces se le avisa que aceptar le cuesta su lugar; y al aceptar, ese lugar se libera (nadie sostiene dos turnos a la vez). | `test:room` + manual (navegador) |
+| 90 | Dado que el invitado acepta, cuando se confirma, entonces la cola muestra el turno con **los dos nombres** y ocupa **un solo** lugar (es una performance, no dos). | `test:room` + manual (navegador) |
+| 91 | Dado que el invitado rechaza, cuando se procesa, entonces el turno **sigue en `duo` sin compañero** —los colores por voz se mantienen— y quien invitó se entera. **No** cae a solista: eso sería dejarlo peor que si no hubiera invitado. | `test:room` + manual (navegador) |
+| 92 | Dado un invitado con una invitación ya pendiente, o que está cantando, cuando le llega otra, entonces se rechaza automáticamente (`busy`): una por vez, sin colas de invitaciones. | `test:room` |
+| 93 | Dado quien invita, cuando invita a otra persona antes de recibir respuesta, entonces la invitación anterior se retira y a esa persona se le avisa (una canción, una invitación viva). | `test:room` |
+| 94 | Dado que quien invitó se desconecta, cambia de canción o pasa a solista antes del turno, cuando eso ocurre, entonces la invitación se descarta y el invitado se entera. | `test:room` |
+| 95 | Dado un aviso del dueto (rechazo, cancelación), cuando llega junto con el `roomState` que refleja ese mismo cambio, entonces el aviso se ve igual — el estado nuevo no lo pisa en el acto. | manual (navegador) |
+
+### El turno
+
+| # | Criterio | Verificación |
+|---|---|---|
+| 96 | Dado un dueto aceptado, cuando arranca el turno, entonces los dos celulares muestran la letra **completa** con la voz propia destacada (P1 el titular, P2 el invitado) y la ajena atenuada — hace falta ver la otra voz para entrar a tiempo. | manual (navegador) |
+| 97 | Dado un dueto aceptado, cuando arranca el turno, entonces `Room.canRelayMic()` deja pasar audio **de los dos** y de nadie más; el interruptor global sigue mandando sobre ambos. | `test:room` |
+| 98 | Dado un dueto, cuando arranca el turno, entonces consume **un** cupo de `MAX_ACTIVE_SINGERS`: el compañero acompaña sin ocupar uno propio. | `test:room` |
+| 99 | Dado que el invitado nunca aceptó (no contestó, rechazó o se desconectó), cuando arranca el turno, entonces la canción se canta en `duo` sin compañero, sin bloquear la rotación ni obligar a nadie a decidir sobre la marcha. | `test:room` |
+| 100 | Dado que quien invitó cambia a 🙂 Solista con un compañero **ya aceptado**, cuando lo hace, entonces se cancela el acompañamiento y se le avisa; el compañero vuelve a elegir canción (la que tenía era prestada). | `test:room` + manual (navegador) |
+| 101 | Dado un dueto en curso, cuando uno de los dos pierde la conexión, entonces el otro sigue cantando y su audio se sigue relayando; si vence el período de gracia, el que queda se entera y termina solo. | `test:room` |
+| 102 | Dado que el turno termina, cuando se cierra, entonces **ambos** vuelven a estado normal y ninguno queda marcado como cantando. | `test:room` + manual (navegador) |
+
+### Audio
+
+| # | Criterio | Verificación |
+|---|---|---|
+| 103 | Dado un frame de audio de cualquiera de los dos, cuando el servidor lo reenvía, entonces lleva una cabecera de 2 bytes con la voz (1 o 2) y el servidor **no decodifica ni modifica** el audio. | `test:room` (`micVoiceOf`) + manual (curl) |
+| 104 | Dadas las dos voces llegando a la Sala, cuando se reproducen, entonces suenan mezcladas y la música baja a `phoneMic.musicVolume` igual que con una sola voz. | manual (Mac) |
+| 105 | Dado que una de las dos voces deja de llegar, cuando eso ocurre, entonces la otra sigue sonando sin cortes ni chasquidos (cada voz tiene su propio jitter buffer). | manual (Mac) |

@@ -82,16 +82,17 @@ class Room {
   activeSingers;        // Set<userId> — en estado "called" o "singing" ahora mismo
   ranking;              // Entry[] — ordenado, mejor puntaje relativo primero
   lowLatencyMode;        // boolean
-  nowPlaying;            // { userId, songId, songTitle, duetMode } | null
+  nowPlaying;            // { userId, songId, songTitle, duetMode, partnerId, partnerNickname } | null
   disconnectTimers;      // Map<userId, Timeout> — cuentas regresivas de DISCONNECT_GRACE_MS
   mode;                  // 'karaoke' | 'ultrastar' | null — modo de sesión, lo fija la Sala
   phoneMicEnabled;       // boolean — interruptor global de "celular como micrófono" (viene de settings)
+  duetInvites;           // Map<inviteeId, { fromId, songId, songTitle }> — una pendiente por invitado
 }
 ```
 
 `mode` arranca en `null` (la Sala todavía no eligió; Sala y celulares muestran el selector) y solo la Sala lo cambia vía `setMode` — cualquier valor que no sea `'karaoke'`/`'ultrastar'` lo devuelve a `null`. Viaja en cada `roomState`.
 
-`phoneMicEnabled` no lo fija nadie por WebSocket: es un espejo en memoria de `phoneMic.enabled` de `settings.json`, que `index.js` sincroniza al arrancar y cada vez que se guarda la configuración (`setPhoneMicEnabled()`). Viaja en cada `roomState` para que Sala y celulares sepan si ofrecer el micrófono por celular. El método `canRelayMic(userId)` combina este flag con `nowPlaying.userId` y es **la única** autorización para que el audio de un celular llegue a los parlantes — ver [03-protocol.md](03-protocol.md).
+`phoneMicEnabled` no lo fija nadie por WebSocket: es un espejo en memoria de `phoneMic.enabled` de `settings.json`, que `index.js` sincroniza al arrancar y cada vez que se guarda la configuración (`setPhoneMicEnabled()`). Viaja en cada `roomState` para que Sala y celulares sepan si ofrecer el micrófono por celular. El método `micVoiceOf(userId)` combina este flag con el turno actual y devuelve **1** (quien tiene el turno), **2** (su compañero de dueto) o `null`; `canRelayMic(userId)` es `micVoiceOf(userId) !== null` y es **la única** autorización para que el audio de un celular llegue a los parlantes — ver [03-protocol.md](03-protocol.md).
 
 ### `User` (valor de `users.get(id)`)
 
@@ -100,7 +101,9 @@ class Room {
 | `id` | `string` (UUID) | Generado con `randomUUID()` al `join`. Es el `userId` que viaja en el protocolo (ver [03-protocol.md](03-protocol.md)). |
 | `nickname` | `string` | Elegido por el usuario, o `Invitado-xxxx` si vino vacío. Se puede cambiar en cualquier momento con `setNickname` (`Room.setNickname()`): se recorta, se limita a 24 caracteres, y si queda vacío se conserva el anterior. El renombrado **no** afecta cola ni estado de turno. |
 | `role` | `"screen" \| "singer" \| "guest" \| "karaoke"` | Se fija en el `join`, salvo que el propio celular se cambie entre `singer`/`guest` con `setRole`. `karaoke` es especial: no viene de un `join` sino de `addKaraokeSinger()` (participante sin celular, `socket: null`, nunca puntúa, se elimina al terminar su turno). |
-| `duetMode` | `"duo" \| "solo" \| null` | Para canciones de dos voces: si la canta entre dos o una sola persona. Lo manda el celular en `chooseSong` o lo cambia después con `setDuetMode`. |
+| `duetMode` | `"duo" \| "solo" \| null` | Para canciones de dos voces: si la canta entre dos o una sola persona. Lo manda el celular en `chooseSong` o lo cambia después con `setDuetMode`. **Hoy `duo` controla una sola cosa**: que la letra se pinte por voces. No filtra notas, no cambia el audio, no afecta la puntuación. |
+| `duetPartnerId` | `string \| null` | Dueto con dos celulares: la otra persona de este turno. Se guarda en **los dos sentidos**, para no tener que recorrer la sala entera y para que romperlo desde cualquiera de los dos lados sea la misma llamada (`endDuetPartnership`). |
+| `duetVoice` | `1 \| 2 \| null` | `1` = es su turno y su canción; `2` = acompaña el turno de otra persona. La voz 2 **no** tiene entrada propia en `queue` ni ocupa un cupo de `activeSingers`. |
 | `state` | `"connected" \| "queued" \| "called" \| "singing" \| "scored"` | Máquina de estados del turno — ver abajo. |
 | `songId`, `songTitle` | `number \| null`, `string \| null` | Canción elegida. `songTitle` ya viene formateado `"Artista — Título"`. |
 | `lastScore` | `{ total, max } \| null` | Puntaje de la última vez que cantó en esta sesión. |
@@ -115,6 +118,15 @@ Transiciones de `state`: `connected` → (elige canción) → `queued` → (`adv
 - `queue`: FIFO simple de `userId`. Se entra por `enqueue()` (al elegir canción), se sale por `advanceQueue()`.
 - `activeSingers`: tope duro de `MAX_ACTIVE_SINGERS = 4` — `advanceQueue()` no saca a nadie más de la cola si ya hay 4 en `called`/`singing`.
 - `nowPlaying`: se setea al llamar a alguien (`advanceQueue`) para que la Sala sepa qué reproducir automáticamente; vuelve a `null` cuando `activeSingers` queda vacío (todos terminaron o se abandonaron).
+
+### Dueto con dos celulares
+
+Un dueto es **un turno**, no dos. Quien elige la canción es la voz 1 y es el dueño del turno: tiene la entrada en `queue` y el cupo en `activeSingers`. La voz 2 acompaña — `advanceQueue()` la pasa a `called` junto al titular pero **no** la agrega a `activeSingers`, así que un dueto consume **un** lugar de `MAX_ACTIVE_SINGERS`.
+
+- La voz 2 **toma prestada** la canción del titular (`songId`/`songTitle`) para poder seguir la letra en su propio celular. Al deshacerse el vínculo se le devuelve un estado limpio (`connected`, sin canción): lo prestado era el turno de otra persona.
+- Aceptar una invitación **libera** el lugar propio en la cola, si lo había. Nadie sostiene dos turnos a la vez, y el celular lo avisa antes de aceptar.
+- `duetInvites` guarda **una invitación pendiente por invitado** (una segunda se rechaza con `busy`) y **una sola viva por invitante** (invitar a otro retira la anterior). Se limpia al responder, al cambiar de canción, al pasar a solista, o cuando cualquiera de los dos se va.
+- `remove(id)` devuelve `{ invitedBy, invitee, partner }` — a quién hay que avisarle que su dueto se cayó. `Room` no conoce el protocolo: devuelve los hechos, `index.js` manda los mensajes.
 
 ### Reconexión
 

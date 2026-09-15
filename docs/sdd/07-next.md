@@ -48,71 +48,11 @@ Cosas ya identificadas como deuda o mejora, que **todavía no tienen mini-spec**
 | Tests de las capas con I/O | Brecha declarada en [05-status-roadmap.md](05-status-roadmap.md) | Endpoints HTTP/WS, indexado con SQLite (necesita DB temporal + fixtures) |
 | `cloudflareApiToken` en texto plano | Brecha declarada en [05-status-roadmap.md](05-status-roadmap.md) | Vive sin cifrar en `server/data/settings.json` |
 | Sin autenticación en Configuración | Brecha declarada en [05-status-roadmap.md](05-status-roadmap.md) | Cualquiera en la LAN puede cambiar carpetas, IP y certificado |
+| Puntuación por voz en duetos (UltraStar) | Quedó explícitamente fuera de alcance del dueto con dos celulares | `notesFromSongPayload` aplana las dos voces sin mirar `player`, así que hoy un dueto se puntúa contra **todas** las notas cantes la voz que cantes. Es lo que hace que el dueto con dos celulares sea solo de Karaoke |
+| Volumen por voz en la mezcla de la Sala | El formato etiquetado de `/ws/micmix` lo habilita | Hoy las dos voces se suman con la misma ganancia y recorta el destino de Web Audio |
 
 ## Features en especificación
 
-### Dueto con dos celulares (modo Karaoke)
+_(Nada en especificación ahora mismo.)_
 
-**Qué**: al elegir una canción de dueto, quien la elige puede invitar a otra persona conectada a cantar la segunda voz. Si acepta, en el turno **los dos celulares** muestran la letra (cada uno con su voz destacada) y, si el micrófono de celular está activo, **las dos voces suenan** por los parlantes de la Sala.
-
-**Por qué**: hoy `duetMode: 'duo'` significa "dos personas comparten un turno y **un** celular" — una sola entrada en la cola y un solo micrófono. En la práctica cada uno tiene su teléfono en la mano, y al pasarse un solo aparato se pierde la letra o se pierde el micrófono. Además `Room.canRelayMic()` solo deja pasar al titular del turno, así que el segundo cantante hoy es literalmente inaudible.
-
-**Decisiones ya tomadas** (para que no se re-discutan al implementar):
-- **La invitación se acepta.** Al invitado le llega un "¿Cantás X conmigo?" con aceptar/rechazar; nadie sube al escenario sin querer.
-- **El servidor sigue siendo un relay tonto**: etiqueta cada frame con la voz (1 o 2) y no decodifica nada. La mezcla la hace la Sala, que ya tiene jitter buffer — usa dos y deja que Web Audio los sume. Esto además habilita volumen por voz más adelante sin tocar el servidor.
-- **Solo modo Karaoke.** En UltraStar haría falta partir el scoring por voz (hoy `notesFromSongPayload` aplana las notas de las dos voces sin mirar `player`), y eso es una feature aparte con su propia spec.
-- **Cada celular muestra la letra completa con su voz destacada**, no solo sus líneas: da contexto para entrar a tiempo cuando las voces se alternan.
-- **El titular canta P1 y el invitado P2.** Sin opción de elegir: simplifica todo y las canciones ya vienen con esa convención.
-- `duetMode: 'duo'` **sin** compañero sigue significando lo de hoy (dos personas, un celular). Esta feature agrega un camino, no reemplaza el existente.
-- **Invitar es opcional.** El flujo arranca como hoy (🙂 Solista / 🎭 Dúo) y, solo si se elige Dúo, aparece la opción de invitar a alguien conectado o seguir sin invitar.
-- **Un rechazo no degrada a solista.** Si el invitado dice que no, el turno **sigue en `duo` sin compañero**: los colores por voz se mantienen y quien esté al lado puede agarrar la segunda voz leyendo la TV. Forzar `solo` apagaría esos colores y dejaría a quien invitó **peor** que si nunca hubiera invitado a nadie. Solista sigue siendo una elección explícita, nunca un castigo.
-
-> **Contexto que no es obvio leyendo el código**: hoy `duetMode` controla **una sola cosa** — si la Sala pinta la letra por voces (`applyDuet(currentDuetSingers && duetPlayMode === 'duo' ? ... : null)` en `app.js`). No filtra notas, no cambia el audio, no afecta la puntuación. Es una ayuda visual para que dos personas sepan a quién le toca cada línea. Tenerlo presente evita sobre-diseñar: esta feature **agrega** el reparto real de voces entre dos celulares, sobre una base que hasta ahora era solo color.
-
-**Criterios de aceptación** (provisionales; al terminar se renumeran dentro de [06-acceptance.md](06-acceptance.md)):
-
-*Invitación*
-1. Dada una canción de dueto, cuando se elige, entonces se pregunta 🙂 Solista / 🎭 Dúo igual que hoy; y solo si se elige Dúo aparece la opción de invitar a alguien de la lista de conectados **o de seguir sin invitar** (lo cantamos con este mismo celular, que es el comportamiento actual).
-2. Dada esa lista, cuando se arma, entonces **no** incluye a la Sala (`role: screen`), ni a participantes de rol `karaoke` (no tienen socket), ni a quien está invitando.
-3. Dada una invitación enviada, cuando llega al invitado, entonces ve quién lo invita y a qué canción, y puede aceptar o rechazar.
-4. Dado que el invitado acepta, cuando se confirma, entonces la cola muestra el turno con **los dos nombres** y ocupa **un solo** lugar (es una performance, no dos).
-5. Dado que el invitado rechaza, cuando se procesa, entonces el turno **sigue en `duo` sin compañero** —los colores por voz se mantienen, como hoy— y quien invitó se entera (no queda esperando en silencio). **No** cae a solista: eso sería dejarlo peor que si no hubiera invitado.
-6. Dado un invitado que ya tiene una invitación pendiente de otra persona, cuando le llega una segunda, entonces se rechaza automáticamente la nueva (una por vez, sin colas de invitaciones).
-7. Dado que quien invitó se va o cancela su canción antes del turno, cuando eso ocurre, entonces la invitación se descarta y el invitado se entera.
-
-*El turno*
-8. Dado un dueto aceptado, cuando arranca el turno, entonces los dos celulares muestran la letra de la canción con la voz propia destacada (P1 para el titular, P2 para el invitado).
-9. Dado un dueto aceptado, cuando arranca el turno, entonces `Room.canRelayMic()` deja pasar audio **de los dos**, y de nadie más.
-10. Dado que el invitado no aceptó antes de que arranque el turno (no contestó, rechazó, o se desconectó), cuando arranca, entonces la canción se canta en `duo` sin compañero — exactamente como hoy — sin bloquear la rotación ni obligar a nadie a decidir sobre la marcha.
-11. Dado que quien invitó quiere cantar solo después de todo, cuando cambia a 🙂 Solista con el toggle que ya existe, entonces vale como elección explícita; si había un compañero que **ya había aceptado**, se cancela el acompañamiento y se le avisa (nadie se baja del escenario sin enterarse, igual que nadie sube sin querer).
-12. Dado un dueto en curso, cuando uno de los dos pierde la conexión, entonces el otro sigue cantando y su audio se sigue relayando.
-13. Dado que el turno termina, cuando se cierra, entonces ambos vuelven a estado normal y ninguno queda marcado como cantando.
-
-*Audio*
-14. Dado un frame de audio de cualquiera de los dos, cuando el servidor lo reenvía, entonces lleva la voz (1 o 2) indicada y el servidor no decodifica ni modifica el audio.
-15. Dadas las dos voces llegando a la Sala, cuando se reproducen, entonces suenan mezcladas y la música baja a `phoneMic.musicVolume` igual que con una sola voz.
-16. Dado que una de las dos voces deja de llegar, cuando eso ocurre, entonces la otra sigue sonando sin cortes ni chasquidos.
-
-**Impacto en los docs**:
-- [x] 01-overview — decisión de producto (el dueto con dos celulares) y qué significa ahora `duo`
-- [ ] 02-architecture — sin archivos nuevos previstos
-- [x] 03-protocol — mensajes de invitación, `partnerId` en `chooseSong`, `partner` en `nowPlaying`, y el **cambio de formato de los frames de `/ws/micmix`** (pasan a llevar la voz)
-- [x] 04-data-model — los campos de `Room`/`User` que sostienen la invitación y el compañero
-- [x] 06-acceptance — criterios definitivos
-
-**Nota de diseño — el formato de `/ws/micmix` cambia.** Hoy los frames son PCM16 crudo sin identificador de origen, justamente porque "solo puede sonar un celular a la vez". Con dos voces hay que distinguirlas: la propuesta es anteponer un byte con el número de voz y dejar el resto igual. **Es un cambio incompatible**: la Sala tiene que actualizarse en el mismo cambio, porque un lector viejo interpretaría ese byte como audio.
-
-**Nota de diseño — la cola y el tope de 4.** El dueto es **un** turno: entra una sola vez en la cola y consume **un** lugar de `MAX_ACTIVE_SINGERS`. El invitado acompaña ese turno (su estado refleja que está cantando) pero no ocupa un cupo propio ni una entrada de cola aparte.
-
-**Fuera de alcance**:
-- Puntuación por voz en UltraStar (es la feature aparte que habilita esto más adelante).
-- Tríos o más: el parser entiende `P3`, pero acá son dos voces y punto.
-- Dos celulares para la **misma** voz.
-- Cambiar de compañero una vez que el turno arrancó.
-- Control de volumen por voz en la Sala (el formato etiquetado lo habilita, pero no se implementa ahora).
-- Invitar a alguien que no está conectado en ese momento.
-
-**Verificación**:
-- **Tests** (`test:room`): todo el ciclo de vida de la invitación (aceptar, rechazar, segunda invitación, invitante que se va), que `canRelayMic` deje pasar a los dos y a nadie más, la caída a modo solo, y que el dueto ocupe un solo lugar en la cola.
-- **Navegador, desde la máquina de desarrollo**: la invitación de punta a punta con **dos ventanas** de `/join.html` — aceptar/rechazar no necesita micrófono, así que no hace falta el MacBook.
-- **MacBook**: la mezcla real de las dos voces por los parlantes, con dos teléfonos de verdad (criterios 14-16). Es lo único que no se puede cerrar acá.
+El dueto con dos celulares salió de acá: sus criterios viven en [06-acceptance.md](06-acceptance.md) §6.9, el protocolo en [03-protocol.md](03-protocol.md) y el modelo en [04-data-model.md](04-data-model.md). La entrada se borra, como dice la regla de arriba — el historial de git guarda cómo se discutió.

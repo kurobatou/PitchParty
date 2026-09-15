@@ -35,6 +35,7 @@ export class Room {
     this.disconnectTimers = new Map(); // id -> Timeout, pending removal after grace period
     this.mode = null; // 'karaoke' | 'ultrastar' | null — chosen once per Sala session on the landing
     this.phoneMicEnabled = false; // global switch: phones may be used as wireless mics (Karaoke)
+    this.duetInvites = new Map(); // inviteeId -> { fromId, songId, songTitle } — at most one per invitee
   }
 
   setLowLatencyMode(enabled) {
@@ -50,11 +51,22 @@ export class Room {
     this.phoneMicEnabled = Boolean(enabled);
   }
 
+  // Which voice this phone's audio belongs to in the current turn: 1 for the
+  // singer who owns the turn, 2 for their duet partner, null for everyone
+  // else. The server tags each relayed frame with this so the Sala can mix
+  // the two streams apart (see /ws/mic in index.js).
+  micVoiceOf(userId) {
+    if (!this.phoneMicEnabled || !this.nowPlaying) return null;
+    if (this.nowPlaying.userId === userId) return 1;
+    if (this.nowPlaying.partnerId === userId) return 2;
+    return null;
+  }
+
   // The rule that keeps a phone from talking over the room: audio is relayed
-  // only while the feature is on AND that phone owns the current turn.
+  // only while the feature is on AND that phone is part of the current turn.
   // Checked per audio frame, so it follows the turn as it changes.
   canRelayMic(userId) {
-    return this.phoneMicEnabled && this.nowPlaying?.userId === userId;
+    return this.micVoiceOf(userId) !== null;
   }
 
   setMode(mode) {
@@ -71,6 +83,8 @@ export class Room {
       songId: null,
       songTitle: null,
       duetMode: null, // 'duo' | 'solo' | null — how a duet song should play
+      duetPartnerId: null, // the other phone singing this duet, both ways
+      duetVoice: null, // 1 = owns the turn, 2 = accompanies it
       lastScore: null,
       latencyMs: null,
       socket,
@@ -96,8 +110,15 @@ export class Room {
     Object.assign(user, patch);
   }
 
+  // Returns who was left hanging by this removal (a pending invitation in
+  // either direction, or an accepted partner) so the caller can tell them —
+  // otherwise someone sits waiting for a duet that can no longer happen.
   remove(id) {
     this.cancelDisconnect(id);
+    const invitedBy = this.duetInvites.get(id)?.fromId ?? null;
+    this.duetInvites.delete(id);
+    const invitee = this.cancelDuetInviteFrom(id);
+    const partner = this.endDuetPartnership(id);
     this.users.delete(id);
     this.queue = this.queue.filter((qid) => qid !== id);
     this.activeSingers.delete(id);
@@ -105,6 +126,7 @@ export class Room {
     // stay stuck on a turn that no longer exists (e.g. a karaoke participant
     // removed when their song ends).
     if (this.nowPlaying?.userId === id) this.nowPlaying = null;
+    return { invitedBy, invitee, partner };
   }
 
   // Socket closed — don't drop the user immediately (see DISCONNECT_GRACE_MS
@@ -184,7 +206,18 @@ export class Room {
     this.activeSingers.add(nextId);
     this.update(nextId, { state: 'called' });
     const user = this.users.get(nextId);
-    this.nowPlaying = { userId: nextId, songId: user.songId, songTitle: user.songTitle, duetMode: user.duetMode ?? null };
+    const partner = this.partnerOf(nextId);
+    this.nowPlaying = {
+      userId: nextId,
+      songId: user.songId,
+      songTitle: user.songTitle,
+      duetMode: user.duetMode ?? null,
+      partnerId: partner?.id ?? null,
+      partnerNickname: partner?.nickname ?? null,
+    };
+    // The partner walks on stage with the host but deliberately stays out of
+    // activeSingers: the duet is one performance and consumes one slot.
+    if (partner) this.update(partner.id, { state: 'called' });
     return nextId;
   }
 
@@ -198,6 +231,7 @@ export class Room {
   finishTurn(id, { total, max }) {
     const user = this.users.get(id);
     this.activeSingers.delete(id);
+    this.endDuetPartnership(id);
     if (!user) return;
     this.update(id, { state: 'scored', lastScore: { total, max } });
     this.ranking.push({
@@ -214,8 +248,129 @@ export class Room {
   // Turn ended without a score (disconnect mid-song, etc).
   abandonTurn(id) {
     this.activeSingers.delete(id);
+    this.endDuetPartnership(id);
     if (this.users.has(id)) this.update(id, { state: 'connected' });
     if (this.activeSingers.size === 0) this.nowPlaying = null;
+  }
+
+  // --- Duets sung from two phones (Karaoke) ---------------------------------
+  //
+  // A duet is ONE turn: the host (voice 1) holds the queue entry, and the
+  // partner (voice 2) rides along without consuming a slot of
+  // MAX_ACTIVE_SINGERS. The link is stored on both users so "who sings with
+  // whom" never means scanning the whole room, and so breaking it from
+  // either side is the same call.
+  //
+  // Everything here returns plain facts — who to tell, and why. The wire
+  // messages live in index.js; Room doesn't know the protocol.
+
+  partnerOf(id) {
+    const partnerId = this.users.get(id)?.duetPartnerId;
+    return partnerId ? this.users.get(partnerId) ?? null : null;
+  }
+
+  // Records an invitation from `fromId` to `toId`. Every reason to refuse is
+  // checked here and not on the phone: the invitee list the phone builds is a
+  // convenience, not a guarantee (any WebSocket client can send this).
+  inviteDuetPartner(fromId, toId) {
+    const from = this.users.get(fromId);
+    const to = this.users.get(toId);
+    if (!from || !to) return { ok: false, reason: 'unknown' };
+    if (fromId === toId) return { ok: false, reason: 'self' };
+    // No socket means nobody to ask: 'karaoke' participants exist only as a
+    // name in the queue, and the Sala doesn't sing.
+    if (!to.socket || to.role === 'screen' || to.role === 'karaoke') return { ok: false, reason: 'unreachable' };
+    if (!from.songId) return { ok: false, reason: 'noSong' };
+    if (from.duetMode !== 'duo') return { ok: false, reason: 'notDuo' };
+    if (from.duetPartnerId) return { ok: false, reason: 'alreadyPartnered' };
+    // One invitation at a time, no queue of invitations (and never yank
+    // someone who is already on stage).
+    if (this.duetInvites.has(toId) || to.duetPartnerId) return { ok: false, reason: 'busy' };
+    if (to.state === 'called' || to.state === 'singing') return { ok: false, reason: 'busy' };
+
+    // The host has a single song, so they can have a single live invitation:
+    // a new one replaces the previous (whoever that was gets told).
+    const superseded = this.cancelDuetInviteFrom(fromId);
+    this.duetInvites.set(toId, { fromId, songId: from.songId, songTitle: from.songTitle });
+    return { ok: true, superseded, songTitle: from.songTitle, songId: from.songId };
+  }
+
+  // Answers the pending invitation addressed to `toId`. Returns null when
+  // there wasn't one (a stale tap, or the host already withdrew it).
+  respondDuetInvite(toId, accept) {
+    const invite = this.duetInvites.get(toId);
+    if (!invite) return null;
+    this.duetInvites.delete(toId);
+
+    const from = this.users.get(invite.fromId);
+    const to = this.users.get(toId);
+    if (!from || !to) return { accepted: false, fromId: invite.fromId, reason: 'gone' };
+    if (!accept) return { accepted: false, fromId: invite.fromId, reason: 'declined' };
+
+    // Accepting a duet means accepting THIS turn: a duet is one queue entry,
+    // and nobody can hold two turns at once, so the partner releases their
+    // own spot if they had one. The phone says so before they accept — it
+    // must never come as a surprise.
+    const gaveUpQueueSpot = this.queue.includes(toId);
+    this.queue = this.queue.filter((qid) => qid !== toId);
+
+    from.duetPartnerId = toId;
+    from.duetVoice = 1;
+    to.duetPartnerId = invite.fromId;
+    to.duetVoice = 2;
+    // The partner borrows the host's song so their phone can follow the same
+    // lyrics; they still have no queue entry of their own.
+    to.songId = from.songId;
+    to.songTitle = from.songTitle;
+    to.duetMode = 'duo';
+    to.state = this.activeSingers.has(invite.fromId) ? 'called' : 'queued';
+
+    if (this.nowPlaying?.userId === invite.fromId) {
+      this.nowPlaying = { ...this.nowPlaying, partnerId: toId, partnerNickname: to.nickname };
+    }
+    return { accepted: true, fromId: invite.fromId, partnerId: toId, gaveUpQueueSpot };
+  }
+
+  // Drops the invitation `fromId` sent, if any. Returns who it was for, so
+  // the caller can tell them it's off.
+  cancelDuetInviteFrom(fromId) {
+    for (const [toId, invite] of this.duetInvites) {
+      if (invite.fromId === fromId) {
+        this.duetInvites.delete(toId);
+        return toId;
+      }
+    }
+    return null;
+  }
+
+  // Breaks the pairing from either side. Returns the other person's id (or
+  // null when there was no duet), so the caller can notify them — nobody
+  // gets taken off the stage without being told.
+  endDuetPartnership(id) {
+    const user = this.users.get(id);
+    const otherId = user?.duetPartnerId ?? null;
+    if (!otherId) return null;
+
+    for (const member of [user, this.users.get(otherId)]) {
+      if (!member) continue;
+      const wasAccompanying = member.duetVoice === 2;
+      member.duetPartnerId = null;
+      member.duetVoice = null;
+      // Voice 2 was only ever borrowing the host's song. Without the duet
+      // there's nothing for them to sing, so hand them back a clean slate;
+      // the host keeps their own song and their place in the queue.
+      if (wasAccompanying) {
+        member.songId = null;
+        member.songTitle = null;
+        member.duetMode = null;
+        member.state = 'connected';
+      }
+    }
+
+    if (this.nowPlaying && (this.nowPlaying.partnerId === id || this.nowPlaying.partnerId === otherId)) {
+      this.nowPlaying = { ...this.nowPlaying, partnerId: null, partnerNickname: null };
+    }
+    return otherId;
   }
 
   toPublicList() {
@@ -240,7 +395,14 @@ export class Room {
       users: this.toPublicList(),
       queue: this.queue.map((id) => {
         const user = this.users.get(id);
-        return { id, nickname: user?.nickname ?? '?', songTitle: user?.songTitle ?? null };
+        return {
+          id,
+          nickname: user?.nickname ?? '?',
+          songTitle: user?.songTitle ?? null,
+          // A duet shows both names on a single line: it's one performance,
+          // not two turns back to back.
+          partnerNickname: this.partnerOf(id)?.nickname ?? null,
+        };
       }),
       ranking: this.ranking.slice(0, 10),
       lowLatencyMode: this.lowLatencyMode,

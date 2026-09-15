@@ -373,6 +373,16 @@ function buildNotesPayload(row) {
   return notes;
 }
 
+// Sends a message to one user by room id, if they're still reachable. Duet
+// bookkeeping is full of "tell the other person" moments, and they all go
+// through here.
+function sendTo(targetId, message) {
+  const target = room.users.get(targetId);
+  if (target?.socket && target.socket.readyState === target.socket.OPEN) {
+    target.socket.send(JSON.stringify(message));
+  }
+}
+
 // Room control channel: used by both the pantalla principal (role
 // "screen") and phones (role "guest"/"singer") to join, pick a song, and
 // receive the live connected-users list + a WebSocket-based latency ping.
@@ -426,6 +436,17 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
     if (!userId) return; // must join before anything else
 
     if (msg.type === 'chooseSong') {
+      // A different song means the duet arrangement around the old one no
+      // longer applies. Whoever was invited (or had already accepted) hears
+      // about it instead of silently ending up on a song they never chose.
+      const wasAccompanying = room.users.get(userId)?.duetVoice === 2;
+      const strandedInvitee = room.cancelDuetInviteFrom(userId);
+      if (strandedInvitee) sendTo(strandedInvitee, { type: 'duetInviteCancelled', reason: 'hostChangedSong' });
+      const strandedPartner = room.endDuetPartnership(userId);
+      if (strandedPartner) {
+        sendTo(strandedPartner, { type: 'duetPartnerEnded', reason: wasAccompanying ? 'partnerLeft' : 'hostChangedSong' });
+      }
+
       const song = getSongById(db, Number(msg.songId));
       const duetMode = msg.duetMode === 'duo' || msg.duetMode === 'solo' ? msg.duetMode : null;
       room.update(userId, {
@@ -461,8 +482,63 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
 
     // Phone changes its duo/solo choice for a duet while queued.
     if (msg.type === 'setDuetMode') {
+      // Only the person whose song it is decides how it gets sung: voice 2 is
+      // borrowing the turn, not running it.
+      if (room.users.get(userId)?.duetVoice === 2) return;
+
       const duetMode = msg.duetMode === 'duo' || msg.duetMode === 'solo' ? msg.duetMode : null;
       room.update(userId, { duetMode });
+
+      // Going Solista is an explicit choice and it's incompatible with having
+      // someone else on stage — so the invitation (or the partnership) ends,
+      // and the other person is told. Nobody gets pulled off the stage in
+      // silence, the same way nobody gets pulled onto it without agreeing.
+      if (duetMode !== 'duo') {
+        const invitee = room.cancelDuetInviteFrom(userId);
+        if (invitee) sendTo(invitee, { type: 'duetInviteCancelled', reason: 'hostSolo' });
+        const partner = room.endDuetPartnership(userId);
+        if (partner) sendTo(partner, { type: 'duetPartnerEnded', reason: 'hostSolo' });
+      }
+      room.broadcastState();
+      return;
+    }
+
+    // --- Duet with two phones: invite someone to sing voice 2 of this turn.
+    if (msg.type === 'inviteDuetPartner') {
+      const result = room.inviteDuetPartner(userId, msg.toUserId);
+      if (!result.ok) {
+        socket.send(JSON.stringify({ type: 'duetInviteResult', accepted: false, reason: result.reason }));
+        return;
+      }
+      // Changing your mind about whom to invite withdraws the previous one,
+      // so that phone isn't left with a modal for an invitation that's gone.
+      if (result.superseded) sendTo(result.superseded, { type: 'duetInviteCancelled', reason: 'superseded' });
+
+      sendTo(msg.toUserId, {
+        type: 'duetInvite',
+        fromUserId: userId,
+        fromNickname: room.users.get(userId)?.nickname ?? null,
+        songId: result.songId,
+        songTitle: result.songTitle,
+      });
+      socket.send(JSON.stringify({
+        type: 'duetInviteSent',
+        toUserId: msg.toUserId,
+        toNickname: room.users.get(msg.toUserId)?.nickname ?? null,
+      }));
+      return;
+    }
+
+    if (msg.type === 'respondDuetInvite') {
+      const result = room.respondDuetInvite(userId, msg.accept === true);
+      if (!result) return; // no pending invitation — a stale tap, ignore it
+      sendTo(result.fromId, {
+        type: 'duetInviteResult',
+        accepted: result.accepted,
+        reason: result.reason ?? null,
+        partnerId: result.partnerId ?? null,
+        partnerNickname: room.users.get(userId)?.nickname ?? null,
+      });
       room.broadcastState();
       return;
     }
@@ -575,7 +651,15 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
     }
 
     room.scheduleDisconnect(userId, () => {
-      room.remove(userId);
+      // Capture the name before the record is gone: the people who were
+      // waiting on this person's duet deserve to be told who dropped out.
+      const nickname = room.users.get(userId)?.nickname ?? null;
+      const dropped = room.remove(userId);
+      if (dropped.invitedBy) {
+        sendTo(dropped.invitedBy, { type: 'duetInviteResult', accepted: false, reason: 'gone', partnerNickname: nickname });
+      }
+      if (dropped.invitee) sendTo(dropped.invitee, { type: 'duetInviteCancelled', reason: 'hostLeft' });
+      if (dropped.partner) sendTo(dropped.partner, { type: 'duetPartnerEnded', reason: 'partnerGone' });
       room.broadcastState();
     });
     room.broadcastState();
@@ -584,11 +668,20 @@ app.get('/ws/room', { websocket: true }, (socket, req) => {
 
 // --- Karaoke "phone as a wireless mic": a relay from the singer's phone to
 // the Sala, which plays it through the speakers. Deliberately dumb — the
-// server never decodes the audio, it just forwards raw 16kHz PCM frames.
+// server never decodes the audio: it tags each frame with the voice it came
+// from and forwards the raw 16kHz PCM untouched behind that tag.
 //
-// Only ONE phone can be heard at a time: the one whose turn it is. That's
-// enforced here rather than on the phone, so a stale or malicious client
-// can't talk over the current singer.
+// Only the CURRENT TURN can be heard: the singer who owns it and, in a duet
+// with two phones, their partner. That's enforced here rather than on the
+// phone, so a stale or malicious client can't talk over whoever is singing.
+//
+// Every relayed frame carries which voice it belongs to (1 = the turn's
+// singer, 2 = their partner) in a 2-byte header. Two bytes and not one so
+// the PCM16 payload behind it stays 2-byte aligned — the Sala can then read
+// it as an Int16Array view over the same buffer instead of copying every
+// frame. This makes the format INCOMPATIBLE with a reader from before it:
+// an old Sala would play the header as audio.
+const MIC_FRAME_VOICE_HEADER = 2;
 const micMixListeners = new Set();
 
 app.get('/ws/micmix', { websocket: true }, (socket) => {
@@ -601,12 +694,17 @@ app.get('/ws/mic/:userId', { websocket: true }, (socket, req) => {
 
   socket.on('message', (data, isBinary) => {
     if (!isBinary) return;
-    // Re-checked per frame (not just on connect): the turn can end, or the
-    // feature be switched off, while this socket is still open.
-    if (!room.canRelayMic(userId)) return;
+    // Re-checked per frame (not just on connect): the turn can end, the
+    // partner can change, or the feature be switched off, while this socket
+    // is still open. null means "this phone has no business being heard".
+    const voice = room.micVoiceOf(userId);
+    if (!voice) return;
 
+    const header = Buffer.alloc(MIC_FRAME_VOICE_HEADER);
+    header.writeUInt8(voice, 0);
+    const frame = Buffer.concat([header, data]);
     for (const listener of micMixListeners) {
-      if (listener.readyState === listener.OPEN) listener.send(data);
+      if (listener.readyState === listener.OPEN) listener.send(frame);
     }
   });
 });

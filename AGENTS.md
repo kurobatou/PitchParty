@@ -38,7 +38,7 @@
 ## Estado actual
 
 - Servidor Node funcionando, con las 5 fases del plan original completas (ver `05-status-roadmap.md`).
-- **51 tests** de la lógica pura (`node --test`), ESLint y un chequeo de sintaxis de todo el JS (incluido el del navegador).
+- **69 tests** de la lógica pura (`node --test`), ESLint y un chequeo de sintaxis de todo el JS (incluido el del navegador).
 - CI en GitHub Actions: corre `check` + `lint` + `test` en Node 18 y 20, en cada push a `main` y en cada PR.
 - Lo que **no** está cubierto por tests: endpoints HTTP/WS, indexado con SQLite, y todo el comportamiento en navegador.
 
@@ -62,7 +62,7 @@ Todo se corre desde `server/`:
 Este proyecto se desarrolla en dos máquinas y **no todo se puede probar en las dos**. Saber dónde frenar es parte del trabajo.
 
 **En Windows (máquina de desarrollo) se puede y se debe verificar:**
-- `npm run ci` completo — los 51 tests, lint y syntax-check pasan acá sin problema (~90 s).
+- `npm run ci` completo — los 69 tests, lint y syntax-check pasan acá sin problema (~90 s).
 - Toda la lógica pura: parser USDX, scoring, detección de tono, `Room`/cola/ranking, validación de mensajes, normalización de settings.
 - La API completa, contra el servidor corriendo (`curl`).
 - **La UI que no necesita micrófono** — la bandeja de mensajes, Configuración, el catálogo de la Sala: se abren en un navegador real y se verifican ahí.

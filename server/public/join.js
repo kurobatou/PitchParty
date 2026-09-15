@@ -41,6 +41,8 @@ const phoneCountdownNumberEl = document.getElementById('phone-countdown-number')
 const phoneNextUpEl = document.getElementById('phone-next-up');
 const scorePctEl = document.getElementById('score-pct');
 const phoneDuetToggle = document.getElementById('phone-duet-toggle');
+const phoneDuetInvite = document.getElementById('phone-duet-invite');
+const duetBanner = document.getElementById('duet-banner');
 const phoneMicToggle = document.getElementById('phone-mic-toggle');
 const renameOverlay = document.getElementById('rename-modal-overlay');
 const renameInput = document.getElementById('rename-input');
@@ -83,6 +85,12 @@ let activeLines = [];
 // Duet choice for the selected song (only meaningful when the song is a duet).
 let selectedIsDuet = false;
 let selectedDuetMode = 'duo';
+// Duet sung from two phones: which voice this phone has (1 = owns the turn,
+// 2 = accompanies someone else's), and who the other person is. Both come
+// from roomState — the server is what decides a duet exists, not this phone.
+let myDuetVoice = null;
+let myDuetPartnerName = null;
+let myState = null;
 // Karaoke lyric sync: anchor { positionMs, at } from the Sala's broadcast; a
 // rAF loop interpolates between broadcasts so the phone shows synced lyrics.
 let karaokeLyricsAnchor = null;
@@ -90,8 +98,9 @@ let karaokeLyricsRaf = null;
 let karaokeSingingNow = false; // true only while it's actually our turn
 
 // Latest queue from roomState, so the end-of-turn screen can show who's up
-// next.
+// next. The user list feeds the "invite someone to the duet" picker.
 let latestQueue = [];
+let latestUsers = [];
 
 // The 3-2-1-¡A cantar! countdown runs here and on the Sala with the same
 // length, both kicked off by the same roomState, so the mic clock this
@@ -365,6 +374,20 @@ function handleRoomMessage(evt) {
     onRoomState(data);
   } else if (data.type === 'karaokeProgress') {
     onKaraokeProgress(data);
+  } else if (data.type === 'duetInvite') {
+    showDuetInvite(data);
+  } else if (data.type === 'duetInviteSent') {
+    duetPendingInviteName = data.toNickname ?? 'esa persona';
+    refreshDuetBanner();
+  } else if (data.type === 'duetInviteResult') {
+    onDuetInviteResult(data);
+  } else if (data.type === 'duetInviteCancelled') {
+    // The invitation is gone — close the modal before someone taps "acepto"
+    // on something that no longer exists.
+    closeDuetInvite();
+    showDuetNotice(DUET_CANCELLED_REASONS[data.reason] ?? 'La invitación al dueto se canceló.');
+  } else if (data.type === 'duetPartnerEnded') {
+    showDuetNotice(DUET_ENDED_REASONS[data.reason] ?? 'El dueto se canceló.');
   }
 }
 
@@ -471,7 +494,9 @@ singAgainBtn.addEventListener('click', async () => {
   stopKaraokeLyrics();
   lyricsPreviewEl.classList.add('hidden');
   phoneDuetToggle.classList.add('hidden');
+  phoneDuetInvite.classList.add('hidden');
   delete document.documentElement.dataset.duet;
+  delete document.documentElement.dataset.myVoice;
   stepSing.classList.add('hidden');
   stepSong.classList.remove('hidden');
   songSearchEl.value = '';
@@ -498,6 +523,10 @@ async function primeMicPermission() {
 }
 
 async function selectSong(songId) {
+  // A new song means any duet arrangement around the old one is off (the
+  // server tells the other person); don't keep showing its status here.
+  duetPendingInviteName = null;
+  refreshDuetBanner();
   selectedSongId = songId;
   const song = allSongs.find((s) => s.id === songId);
   selectedSongTitle = song ? `${song.artist} — ${song.title}` : null;
@@ -519,6 +548,16 @@ async function selectSong(songId) {
   updateDuetToggleUI('queued');
   singAgainBtn.textContent = '🔁 Cambiar mi canción';
   singAgainBtn.classList.remove('hidden');
+
+  // Two phones, one duet: only in Karaoke (in UltraStar the score would still
+  // be calculated over both voices — that's a separate feature). Inviting is
+  // optional: "seguir sin invitar" is the behaviour we've always had.
+  if (selectedIsDuet && selectedDuetMode === 'duo' && currentMode === 'karaoke') {
+    const inviteeId = await askDuetPartner(selectedSongTitle);
+    if (inviteeId && roomWs?.readyState === WebSocket.OPEN) {
+      roomWs.send(JSON.stringify({ type: 'inviteDuetPartner', toUserId: inviteeId }));
+    }
+  }
 
   unlockAlertAudio();
   requestWakeLock();
@@ -554,21 +593,211 @@ function askPhoneDuetMode(title) {
   });
 }
 
-// Shows the "change duo/solo" button while queued for a duet.
+// --- Duet with two phones: invite, accept, and keep everyone informed ------
+
+// Who can be asked to sing voice 2 right now. The server re-checks all of
+// this (see Room.inviteDuetPartner) — this list is a convenience, not the
+// rule. Screens never reach here: roomState already leaves them out.
+function duetCandidates() {
+  return latestUsers.filter((u) => u.id !== userId
+    && u.role !== 'karaoke' // no socket: they only exist as a name in the queue
+    && u.connected
+    && !u.duetPartnerId
+    && u.state !== 'called' && u.state !== 'singing'); // don't pull anyone off stage
+}
+
+// Resolves to the chosen user's id, or null for "seguir sin invitar" — which
+// is the old behaviour (two people, one phone) and a perfectly good answer.
+function askDuetPartner(title) {
+  return new Promise((resolve) => {
+    const candidates = duetCandidates();
+    const overlay = document.createElement('div');
+    overlay.className = 'mic-modal-overlay';
+    overlay.innerHTML = `
+      <div class="mic-modal">
+        <h3>¿La cantás con alguien? 🎭</h3>
+        <div class="karaoke-modal-song">${escapeHtml(title || '')}</div>
+        <p class="mic-modal-label">${candidates.length
+          ? 'Elegí quién canta la segunda voz desde su propio celular. Tiene que aceptar.'
+          : 'Ahora mismo no hay nadie a quien invitar.'}</p>
+        <ul class="song-results duet-invite-list">${candidates
+          .map((u) => `<li data-id="${escapeHtml(u.id)}">${escapeHtml(u.nickname)}</li>`)
+          .join('')}</ul>
+        <div class="mic-modal-actions">
+          <button type="button" id="pd-no-invite" class="primary-btn">Seguir sin invitar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const done = (id) => { overlay.remove(); resolve(id); };
+    overlay.querySelectorAll('li[data-id]').forEach((li) => {
+      li.addEventListener('click', () => done(li.dataset.id));
+    });
+    overlay.querySelector('#pd-no-invite').addEventListener('click', () => done(null));
+  });
+}
+
+let duetInviteOverlay = null;
+
+function closeDuetInvite() {
+  duetInviteOverlay?.remove();
+  duetInviteOverlay = null;
+}
+
+function showDuetInvite(data) {
+  closeDuetInvite();
+  // Accepting means taking THIS turn, so anyone already in line has to know
+  // they're trading their own spot for it before they say yes.
+  const warning = myState === 'queued'
+    ? '<br />Ojo: si aceptás, dejás tu lugar actual en la cola.'
+    : '';
+  const overlay = document.createElement('div');
+  overlay.className = 'mic-modal-overlay';
+  overlay.innerHTML = `
+    <div class="mic-modal">
+      <h3>🎭 Te invitan a un dueto</h3>
+      <div class="karaoke-modal-song">${escapeHtml(data.songTitle || '')}</div>
+      <p class="mic-modal-label">
+        <strong>${escapeHtml(data.fromNickname || 'Alguien')}</strong> quiere cantarla con vos.
+        Vos hacés la <strong>voz 2</strong> desde este celular.${warning}
+      </p>
+      <div class="duet-choose-actions">
+        <button type="button" id="di-accept" class="primary-btn">🎤 Dale, canto</button>
+        <button type="button" id="di-decline">Ahora no</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  duetInviteOverlay = overlay;
+
+  const respond = (accept) => {
+    closeDuetInvite();
+    if (roomWs?.readyState === WebSocket.OPEN) {
+      roomWs.send(JSON.stringify({ type: 'respondDuetInvite', accept }));
+    }
+    if (!accept) showDuetNotice('Rechazaste la invitación al dueto.');
+  };
+  overlay.querySelector('#di-accept').addEventListener('click', () => respond(true));
+  overlay.querySelector('#di-decline').addEventListener('click', () => respond(false));
+}
+
+// One-line duet status, shown above whatever step is open. Two layers: a
+// resting line derived from roomState, and transient notices on top of it.
+const DUET_NOTICE_MS = 7000;
+let duetNoticeTimer = null;
+let duetNoticeShowing = false;
+let duetPendingInviteName = null; // invitation sent, still unanswered
+
+function paintDuetBanner(text) {
+  duetBanner.textContent = text ?? '';
+  duetBanner.classList.toggle('hidden', !text);
+}
+
+// "Te rechazaron", "se canceló el dueto"… These outrank the resting line for
+// a few seconds — including against the very roomState that carries the
+// change they're announcing, which would otherwise wipe them instantly and
+// leave the person with no idea what happened.
+function showDuetNotice(text) {
+  clearTimeout(duetNoticeTimer);
+  duetNoticeShowing = true;
+  paintDuetBanner(text);
+  duetNoticeTimer = setTimeout(() => {
+    duetNoticeShowing = false;
+    refreshDuetBanner();
+  }, DUET_NOTICE_MS);
+}
+
+function restingDuetText() {
+  if (myDuetVoice === 2) return `🎭 Cantás la voz 2 con ${myDuetPartnerName ?? 'tu compañero/a'}.`;
+  if (myDuetVoice === 1) return `🎭 Dueto con ${myDuetPartnerName ?? 'tu compañero/a'} — vos hacés la voz 1.`;
+  if (duetPendingInviteName) return `🎭 Invitación enviada a ${duetPendingInviteName}. Esperando respuesta...`;
+  return null;
+}
+
+function refreshDuetBanner() {
+  if (duetNoticeShowing) return;
+  paintDuetBanner(restingDuetText());
+}
+
+const DUET_DECLINE_REASONS = {
+  declined: (who) => `${who} prefiere no cantarla. Seguís en dúo: la segunda voz queda libre para quien se prenda.`,
+  busy: () => 'Esa persona ya tiene una invitación pendiente o está cantando. Probá con otra.',
+  gone: (who) => `${who} se desconectó. Seguís en dúo, sin compañero.`,
+  unreachable: () => 'A esa persona no se le puede avisar (no tiene celular en la sala).',
+  self: () => 'No te podés invitar a vos mismo 🙂',
+  unknown: () => 'Esa persona ya no está en la sala.',
+  noSong: () => 'Elegí primero una canción.',
+  notDuo: () => 'Para invitar a alguien tenés que estar en modo Dúo.',
+  alreadyPartnered: () => 'Ya tenés compañero/a para esta canción.',
+};
+
+function onDuetInviteResult(data) {
+  duetPendingInviteName = null; // answered, one way or the other
+  const who = data.partnerNickname || 'Esa persona';
+  if (data.accepted) {
+    showDuetNotice(`🎭 ${who} acepta: cantan juntos. Vos hacés la voz 1.`);
+    return;
+  }
+  const reason = DUET_DECLINE_REASONS[data.reason] ?? (() => 'No se pudo armar el dueto.');
+  showDuetNotice(reason(who));
+}
+
+const DUET_CANCELLED_REASONS = {
+  superseded: 'Esa invitación quedó sin efecto: invitaron a otra persona.',
+  hostSolo: 'Se canceló la invitación: van a cantarla en solitario.',
+  hostChangedSong: 'Se canceló la invitación: cambiaron de canción.',
+  hostLeft: 'Se canceló la invitación: quien te invitó se desconectó.',
+};
+
+const DUET_ENDED_REASONS = {
+  hostSolo: 'El dueto se canceló: van a cantarla en solitario.',
+  hostChangedSong: 'El dueto se canceló: cambiaron de canción.',
+  partnerLeft: 'Tu compañero/a se bajó del dueto.',
+  partnerGone: 'Tu compañero/a se desconectó.',
+};
+
+// Shows the "change duo/solo" button while queued for a duet, plus the
+// "invite someone" button when there's still a second voice going spare.
 function updateDuetToggleUI(state) {
-  const show = selectedIsDuet && (state === undefined || state === 'queued');
+  // Voice 2 is borrowing someone else's turn — how it gets sung isn't theirs
+  // to change (the server ignores it too).
+  const queued = state === undefined || state === 'queued';
+  const show = selectedIsDuet && myDuetVoice !== 2 && queued;
   if (show) {
     phoneDuetToggle.textContent = selectedDuetMode === 'duo' ? '🎭 Dúo — tocá para cambiar' : '🙂 Solista — tocá para cambiar';
     phoneDuetToggle.classList.remove('hidden');
   } else {
     phoneDuetToggle.classList.add('hidden');
   }
+
+  // Inviting is optional AND reversible: you can skip it at first and change
+  // your mind, or ask someone else after a "no". Without this the only way
+  // in would be re-picking the song from scratch.
+  const canInvite = show && selectedDuetMode === 'duo' && currentMode === 'karaoke' && !myDuetVoice;
+  phoneDuetInvite.classList.toggle('hidden', !canInvite);
 }
 
+phoneDuetInvite.addEventListener('click', async () => {
+  const inviteeId = await askDuetPartner(selectedSongTitle);
+  if (inviteeId && roomWs?.readyState === WebSocket.OPEN) {
+    roomWs.send(JSON.stringify({ type: 'inviteDuetPartner', toUserId: inviteeId }));
+  }
+});
+
 phoneDuetToggle.addEventListener('click', () => {
-  if (!selectedIsDuet) return;
+  if (!selectedIsDuet || myDuetVoice === 2) return;
   selectedDuetMode = selectedDuetMode === 'duo' ? 'solo' : 'duo';
   updateDuetToggleUI('queued');
+  // Choosing Solista with someone already on board ends the arrangement (the
+  // server tells them). Say it here so it isn't a silent side effect.
+  if (selectedDuetMode === 'solo') {
+    // The server drops any pending invitation too — stop saying we're still
+    // waiting for an answer that will never come.
+    duetPendingInviteName = null;
+    if (myDuetVoice === 1) {
+      showDuetNotice(`Cambiaste a solista: le avisamos a ${myDuetPartnerName ?? 'tu compañero/a'}.`);
+    } else {
+      refreshDuetBanner();
+    }
+  }
   if (roomWs?.readyState === WebSocket.OPEN) {
     roomWs.send(JSON.stringify({ type: 'setDuetMode', duetMode: selectedDuetMode }));
   }
@@ -729,13 +958,23 @@ function routeToStep(self) {
     if (!selectedSongId && self.songId) {
       selectedSongId = self.songId;
       selectedSongTitle = self.songTitle ?? null;
+      // After a reload/reconnect nothing local remembers that this was a duet
+      // — but the server does: it only ever stores a duetMode for duet songs.
+      // Without this the duo/solo toggle and the invite button vanish for
+      // someone who just locked their phone while waiting.
+      selectedIsDuet = self.duetMode !== null && self.duetMode !== undefined;
+      if (selectedIsDuet) selectedDuetMode = self.duetMode;
     }
     stepGuest.classList.add('hidden');
     stepSong.classList.add('hidden');
     stepSing.classList.remove('hidden');
     // Let the singer swap their song while still waiting, or pick again after
-    // being scored. Hidden once it's actually their turn (called/singing).
-    if (self.state === 'queued' || self.state === 'scored') {
+    // being scored. Hidden once it's actually their turn (called/singing), and
+    // for voice 2 of a duet: the song isn't theirs to change, and tapping it
+    // would quietly pull them out of the duet they just agreed to.
+    if (myDuetVoice === 2) {
+      singAgainBtn.classList.add('hidden');
+    } else if (self.state === 'queued' || self.state === 'scored') {
       singAgainBtn.textContent = self.state === 'queued' ? '🔁 Cambiar mi canción' : '🎤 Elegir otra canción';
       singAgainBtn.classList.remove('hidden');
     } else {
@@ -750,9 +989,11 @@ function routeToStep(self) {
     stopKaraokeLyrics();
     lyricsPreviewEl.classList.add('hidden');
     delete document.documentElement.dataset.duet;
+    delete document.documentElement.dataset.myVoice;
     activeLines = [];
     selectedIsDuet = false;
     phoneDuetToggle.classList.add('hidden');
+    phoneDuetInvite.classList.add('hidden');
     if (allSongs.length === 0) loadAllSongs();
   }
 }
@@ -773,6 +1014,22 @@ function onRoomState(data) {
   if (!self) return;
 
   latestQueue = data.queue;
+  latestUsers = data.users;
+  myState = self.state;
+
+  // Duet with two phones: the server owns this relationship, so read it from
+  // the broadcast rather than remembering what we asked for. Voice 2 never
+  // chose a song — the server lends them the host's so the lyrics work.
+  const hadDuetVoice = myDuetVoice;
+  myDuetVoice = self.duetVoice ?? null;
+  myDuetPartnerName = self.duetPartnerId
+    ? data.users.find((u) => u.id === self.duetPartnerId)?.nickname ?? null
+    : null;
+  if (myDuetVoice) {
+    selectedIsDuet = true;
+    selectedDuetMode = 'duo';
+  }
+  if (myDuetVoice !== hadDuetVoice) refreshDuetBanner();
 
   // While someone is taking their turn, only that active singer keeps the
   // "avanzar cola" button — everyone else has it blocked so a bystander
@@ -839,7 +1096,11 @@ function onRoomState(data) {
       });
     }
   } else if (self.state === 'queued') {
-    const position = data.queue.findIndex((q) => q.id === self.id) + 1;
+    // Voice 2 has no queue entry of their own: the duet is a single spot,
+    // held by the person who invited them.
+    const position = myDuetVoice === 2
+      ? data.queue.findIndex((q) => q.id === self.duetPartnerId) + 1
+      : data.queue.findIndex((q) => q.id === self.id) + 1;
     startMicBtn.disabled = true;
     singStatus.textContent = position > 0
       ? `Esperando tu turno (posición ${position} en la cola)...`
@@ -877,8 +1138,17 @@ async function loadLyricsFor(songId) {
       // voices interleave (same as the Sala).
       .sort((a, b) => a.startMs - b.startMs);
     // Colour the lyric lines by voice only when it's a duet played as a duo.
-    if (selectedIsDuet && selectedDuetMode === 'duo') document.documentElement.dataset.duet = '1';
-    else delete document.documentElement.dataset.duet;
+    if (selectedIsDuet && selectedDuetMode === 'duo') {
+      document.documentElement.dataset.duet = '1';
+      // In a two-phone duet each screen shows the WHOLE lyric with its own
+      // voice brought forward — you need to see the other voice to come in on
+      // time. Without a partner nothing is dimmed: today's look, untouched.
+      if (myDuetVoice) document.documentElement.dataset.myVoice = String(myDuetVoice);
+      else delete document.documentElement.dataset.myVoice;
+    } else {
+      delete document.documentElement.dataset.duet;
+      delete document.documentElement.dataset.myVoice;
+    }
   } catch (err) {
     console.warn('could not load lyrics for phone preview', err);
     activeLines = [];

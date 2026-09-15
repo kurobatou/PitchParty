@@ -32,6 +32,11 @@
       <button id="advance-queue-btn" type="button">▶ Empezar / avanzar cola</button>
     </div>
 
+    <!-- Estado del dueto (invitación enviada, compañero, cancelación). Vive
+         fuera de los pasos porque las novedades del dueto pueden llegar
+         estés donde estés: eligiendo canción o esperando tu turno. -->
+    <p id="duet-banner" class="duet-banner hidden"></p>
+
     <div id="step-join">
       <input id="nickname" type="text" placeholder="Tu nombre" maxlength="24" />
       <div class="role-row">
@@ -55,6 +60,7 @@
       <p class="status-line" id="sing-status">Esperando...</p>
       <p class="song-info hidden" id="sing-song-info"></p>
       <button id="phone-duet-toggle" class="phone-duet-toggle hidden" type="button"></button>
+      <button id="phone-duet-invite" class="phone-duet-toggle hidden" type="button">🎭 Invitar a alguien a la segunda voz</button>
       <button id="phone-mic-toggle" class="phone-mic-toggle hidden" type="button"></button>
       <button id="start-mic-btn" disabled>🎤 Empezar a cantar</button>
       <button id="stop-mic-btn" disabled>■ Detener</button>
