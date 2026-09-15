@@ -8,23 +8,23 @@ Celular — Cantante/Invitado (PWA, navegador)
   └─ WebSocket /ws/sing/:songId  (solo cantante: sube PCM16 mono 16kHz, recibe frames de puntaje)
                     │
                     ▼
-        ┌───────────────────────────────────────────┐
-        │        Servidor Node.js — un solo proceso   │
-        │        (Fastify, server/src/index.js)       │
-        │                                              │
-        │  - Catálogo + indexador (SQLite)             │
-        │  - Sala/sesión + cola de turnos (Room, en    │
-        │    memoria, sin persistencia)                │
+        ┌───────────────────────────────────────────────┐
+        │        Servidor Node.js — un solo proceso     │
+        │        (Fastify, server/src/index.js)         │
+        │                                               │
+        │  - Catálogo + indexador (SQLite)              │
+        │  - Sala/sesión + cola de turnos (Room, en     │
+        │    memoria, sin persistencia)                 │
         │  - Motor de puntuación (pitch.js + scoring.js,│
         │    JavaScript puro, corre inline por cada     │
-        │    socket /ws/sing — sin proceso separado)   │
+        │    socket /ws/sing — sin proceso separado)    │
         │  - HTTPS (autofirmado o Let's Encrypt DNS-01) │
-        │  - API REST: canciones, archivos, settings,  │
+        │  - API REST: canciones, archivos, settings,   │
         │    QR, selector de carpeta nativo             │
-        └───────────────────────┬─────────────────────┘
-                                 │ HTTP (estáticos + audio/video/cover)
-                                 │ WebSocket /ws/room (estado, letras, QR ya generado, latencia)
-                                 ▼
+        └───────────────────────┬───────────────────────┘
+                                │ HTTP (estáticos + audio/video/cover)
+                                │ WebSocket /ws/room (estado, letras, QR ya generado, latencia)
+                                ▼
         Pantalla principal — "Sala" (navegador de la TV o equipo por HDMI)
 
 Biblioteca de canciones: una o más carpetas (local y/o NAS montado por el
@@ -64,6 +64,7 @@ No hay bundler, transpilador ni gestor de paquetes del lado del cliente — los 
 | `room.js` | Estado de la sala en memoria: usuarios conectados, cola de turnos, cantantes activos, ranking de la sesión, modo de baja latencia, reconexión con período de gracia. Ver [04-data-model.md](04-data-model.md) para el detalle campo por campo. |
 | `pitch.js` | `detectPitch(samples, sampleRate)`: estima la frecuencia fundamental de una ventana de audio por autocorrelación, o `null` si es silencio. |
 | `scoring.js` | `ScoringSession`: compara la nota detectada contra la esperada del `.txt` (tolerante a octava) y acumula puntaje frame a frame. `notesFromSongPayload` aplana las notas de una canción a la forma que consume la sesión. |
+| `messages.js` | `MESSAGE_TYPES` (`bug`, `sync`, `general`, `song_request`) + `validateMessagePayload()`: validación pura de los mensajes que manda un celular, sin tocar SQLite (por eso es testeable sola). `index.js` es el que resuelve el `songId` de un reporte `sync` contra el catálogo y persiste la fila. |
 | `netinfo.js` | `detectLanIp()`: heurística para adivinar la IP LAN de este equipo al arrancar (usada para el certificado autofirmado y el QR). |
 | `folderDialog.js` | `browseForFolder()`: abre el selector de carpetas nativo del sistema operativo (usado por el botón "Buscar carpeta..." de Configuración). Puede no estar disponible en todos los SO (responde 501 si no). |
 | `tls.js` | Genera/cachea el certificado HTTPS autofirmado para la IP LAN detectada. |
@@ -78,6 +79,8 @@ No hay bundler, transpilador ni gestor de paquetes del lado del cliente — los 
 | `join.html` / `join.js` | Pantalla del **celular**: elegir apodo/rol, buscar canción, esperar en cola, cantar (captura de mic, envío de PCM16 por `/ws/sing`, letra previa/actual/siguiente, ecualizador de afinación en vivo derivado 100% en cliente de los frames de puntaje), avanzar cola, reconexión/rejoin con recuperación de sesión (`localStorage`). |
 | `settings.html` / `settings.js` | Pantalla de **Configuración**: carpetas de biblioteca (con selector nativo o ruta a mano), IP LAN, dominio + token de Cloudflare para Let's Encrypt, y **habilitación** de micrófonos físicos (enumera `audioinput` vía `enumerateDevices` tras un permiso de mic; guarda los tildados como `{deviceId, label}` en `localMics`, sin nombre de cantante). Sin rediseño visual propio — hereda la paleta de `style.css` pasivamente. |
 | `localmics.js` | Cargado por la **Sala**. Expone `window.localMics` (API que usa `app.js`) y gestiona: (a) agregar un cantante sin celular vía un modal (nombre + canción) que abre su **propio** `/ws/room` como `singer` y hace `chooseSong` → entra a la cola; (b) la captura de audio del turno. Justo antes del turno de un mic-singer, `app.js` muestra una pantalla de preparación (elegir/probar el mic con medidor de nivel); al "Empezar", `localmics.js` captura desde el `deviceId` elegido y streamea a `/ws/sing`, alineado con la cuenta atrás. El servidor no distingue un mic local de un celular. |
+| `messages.html` / `messages.js` | Bandeja de **mensajes**: lista lo que dejaron los celulares (bugs, canciones desincronizadas, notas generales, pedidos de canción), permite marcarlos como resueltos (`PATCH`) y borrarlos (`DELETE`). Se abre desde la Sala. |
+| `messageTypes.js` | Los cuatro tipos de mensaje y sus etiquetas, compartidos entre el formulario del celular (`join.js`) y la bandeja (`messages.js`) para que no se dupliquen strings. El espejo del lado del servidor es `server/src/messages.js`. |
 | `sing.html` / `sing.js` | Página de **debug/prueba de carga** del motor de puntuación (Fase 1 original), independiente de la Sala/join. Tiene su propio `<style>` embebido que no participa del sistema de temas — queda siempre oscura. No es parte del flujo real de un usuario final. |
 | `style.css` | Hoja de estilos única para todas las páginas: tokens de tema (`:root` oscuro por defecto, `[data-theme="light"]`), y todas las reglas visuales de Sala/join/settings. |
 | `theme.js` | `initTheme()`, `toggleTheme()`, `themeIcon()` — mecanismo compartido de tema claro/oscuro (atributo `data-theme` en `<html>` + `localStorage['pitchparty-theme']`). Importado por `app.js` y `join.js`. |
@@ -89,9 +92,13 @@ No hay bundler, transpilador ni gestor de paquetes del lado del cliente — los 
 server/               Servidor Node (todo el backend + el motor de puntuación)
 server/src/           Código del servidor (ver tabla arriba)
 server/public/        Cliente web servido tal cual (sin build step)
+server/test/          Tests de la lógica pura (node --test) — ver docs/sdd/06-acceptance.md
+server/scripts/       Utilidades del CI (check-syntax.mjs)
 server/data/          DB SQLite, settings.json, certificados — no versionado, se crea solo
 songs/                Biblioteca de canciones UltraStar — no versionado, la aporta el usuario
 config.json            libraryPaths por defecto (editable después desde la UI)
+.github/workflows/     CI (npm run ci: check + lint + test) en cada push y PR a main
+AGENTS.md              Reglas para agentes de IA y humanos que tocan este repo
 docs/sdd/              Esta especificación técnica
 plan_karaoke_v0.03.md  Plan de producto original — histórico, ver docs/sdd/00-index.md
 ```

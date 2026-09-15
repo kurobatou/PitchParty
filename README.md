@@ -8,12 +8,15 @@ Reutiliza el catálogo y formato de canciones de **UltraStar Deluxe** (`.txt` + 
 
 ## Qué incluye
 
+- **Dos modos de sesión**, elegidos desde la pantalla inicial de la Sala: **UltraStar** (con puntuación — el celular manda el audio y recibe puntaje en vivo) y **Karaoke** (sin puntuación — solo la letra sincronizada, pensado para cantar con micrófono físico o simplemente sin que nadie mida nada). Los celulares heredan el modo automáticamente. En modo Karaoke la Sala puede además encolar a alguien que ni siquiera tiene el celular conectado: solo nombre + canción.
+- **Duetos**: las canciones UltraStar con dos voces (marcadores `P1`/`P2`) se pueden cantar en **dúo** — dos personas, con la letra de cada voz en su color — o en **solo**, si alguien se anima a hacer las dos partes. Se elige al pedir la canción y se puede cambiar mientras se espera en la cola.
 - **Sala** (pantalla principal): catálogo de canciones con buscador y selector de letras A-Z (útil con bibliotecas grandes, ej. un NAS con 200+ canciones), botón de pantalla completa, código QR para que los celulares se conecten, lista de usuarios conectados en tiempo real (en cola / cantando / puntaje), cola de turnos con quién-canta-qué visible y rotación manual (desde la Sala o desde cualquier celular), ranking de la sesión, indicador de latencia de red y modo de baja latencia. Todo dentro de una tarjeta centrada con **tema claro/oscuro** (botón 🌙/☀️, se recuerda entre visitas).
 - **Motor de puntuación** (JavaScript, corre en el mismo proceso que el servidor): detecta el tono de la voz por autocorrelación y lo compara contra las notas `.txt` de UltraStar (tolerante a errores de octava). Hasta 4 cantantes simultáneos.
 - **Micrófonos físicos** (sin celular): en **⚙️ Configuración** elegís qué micrófonos conectados a la máquina de la Sala (por ejemplo uno Bluetooth emparejado) van a estar disponibles. Después, desde la Sala, agregás un cantante sin celular (nombre + canción) con "➕ Cantante con micrófono" — entra en la cola como todos. Justo antes de su turno aparece una pantalla de preparación para elegir y **probar** el micrófono (con barra de nivel en vivo) y recién ahí arranca la cuenta atrás y la canción. Recibe puntaje/ranking igual que quien usa celular. La captura ocurre en el navegador de la Sala (el micrófono es solo otro dispositivo de entrada), así que no hace falta ninguna librería de audio nativa.
 - **Celular como micrófono** (PWA vía navegador): se une por QR, elige rol (cantante/invitado) y busca su canción con autocompletado. El permiso de micrófono se pide apenas elige la canción (mientras espera en la cola), así que cuando la Sala lo llama el micrófono arranca solo, sin pasos extra (con vibración/beep de aviso). Mientras canta ve el título/artista, la letra (línea previa/actual/siguiente) y un **ecualizador de afinación en vivo** (12 barras + % de acierto, calculado en el navegador a partir del puntaje en tiempo real) en su propia pantalla, sin reproducir audio. Al terminar la canción (o si la Sala corta antes) el micrófono se apaga solo, muestra el puntaje final, y deja elegir otra canción. Cualquier conectado (cantante o invitado) puede además avanzar la cola/arrancar el próximo turno desde su propio celular. La pantalla intenta no bloquearse sola mientras espera en cola, y si igual se corta la conexión (bloqueo de pantalla, Wi-Fi), reconecta sola y recupera su lugar en la cola durante los siguientes 90 segundos.
 - **Fondos**: video propio de la canción si existe (servido por HTTP), o uno de varios efectos con las ondas reales del audio (barras, barras espejadas, anillos radiales, osciloscopio) cuando no hay video — se elige un efecto distinto por canción para que la biblioteca no se vea siempre igual.
-- **Configuración desde la UI** (`⚙️ Configuración` desde la Sala): carpetas de biblioteca (con selector de carpeta nativo del sistema operativo, útil para elegir un NAS ya montado), IP del servidor si hace falta forzarla, certificado HTTPS, y asignación de micrófonos físicos a cantantes.
+- **Mensajes desde el celular**: cualquiera puede dejar un mensaje sin cortar la fiesta — reportar un bug, avisar que una canción está desincronizada (queda anotada cuál), dejar una nota general, o pedir una canción/artista que no está en la biblioteca. Quedan guardados y se revisan después desde la bandeja (`messages.html`), donde se marcan como resueltos o se borran.
+- **Configuración desde la UI** (`⚙️ Configuración` desde la Sala): carpetas de biblioteca (con selector de carpeta nativo del sistema operativo, útil para elegir un NAS ya montado), IP del servidor si hace falta forzarla, certificado HTTPS, qué micrófonos físicos quedan habilitados, y el **monitor de micrófono** (hacer sonar un micrófono conectado a la máquina de la Sala por los parlantes mientras corre la canción, bajando la música a un porcentaje configurable).
 - **HTTPS**: por defecto autofirmado (necesario porque el micrófono del navegador exige un "contexto seguro"), con la IP de este equipo detectada sola al arrancar. Opcionalmente, con un dominio propio en Cloudflare, se puede generar un certificado real de Let's Encrypt desde la misma pantalla de Configuración — sin la advertencia de "sitio no seguro" y sin exponer el servidor a internet (ver más abajo).
 
 ## Arquitectura
@@ -30,7 +33,7 @@ Pantalla principal  ──WebSocket (estado, letras)──► Servidor Node (Fas
                                                      └─────────────────────────
 ```
 
-Ver [docs/sdd/](docs/sdd/00-index.md) para la especificación técnica completa (arquitectura, protocolo WebSocket/HTTP, modelo de datos, estado de cada fase) — pensada para orientar rápido a quien nunca vio este repo, humano o agente de IA. [plan_karaoke_v0.03.md](plan_karaoke_v0.03.md) es el plan de producto original, previo a la implementación; se conserva como referencia histórica, pero describe una arquitectura con un motor de puntuación en Python que ya no existe.
+Ver [docs/sdd/](docs/sdd/00-index.md) para la especificación técnica completa (arquitectura, protocolo WebSocket/HTTP, modelo de datos, criterios de aceptación, estado de cada fase) — pensada para orientar rápido a quien nunca vio este repo, humano o agente de IA. Si vas a **modificar** el proyecto, leé antes [AGENTS.md](AGENTS.md): explica, entre otras cosas, que esos documentos se actualizan en el mismo commit que el código. [plan_karaoke_v0.03.md](plan_karaoke_v0.03.md) es el plan de producto original, previo a la implementación; se conserva como referencia histórica, pero describe una arquitectura con un motor de puntuación en Python que ya no existe.
 
 ## Cómo correrlo
 
@@ -81,7 +84,9 @@ server/               Servidor Node (Fastify): motor de puntuación, indexador, 
 server/data/          DB SQLite, certificados (autofirmado y Let's Encrypt) y ajustes — no versionado, se crea solo
 server/public/        Cliente web: Sala (index), unirse desde el celular (join), configuración (settings)
 server/test/          Tests unitarios de la lógica pura (node --test)
+server/scripts/       Utilidades del CI (chequeo de sintaxis de todo el JS)
 docs/sdd/             Especificación técnica del proyecto
+AGENTS.md             Reglas para quien toque el repo (humano o agente de IA)
 songs/                Biblioteca de canciones UltraStar (no versionada)
 config.json           Carpeta(s) de biblioteca por defecto (editable después desde la UI)
 .github/workflows/    CI (GitHub Actions): check + lint + tests en cada PR
@@ -97,7 +102,7 @@ npm ci
 npm run ci     # corre los tres de abajo en orden
 ```
 
-- `npm test` — tests unitarios de la lógica pura (parser USDX, scoring, detección de tono, sala/cola/ranking) con el runner nativo de Node (`node --test`).
+- `npm test` — 51 tests unitarios de la lógica pura (parser USDX incluidos duetos, scoring, detección de tono, sala/cola/ranking/modos, validación de mensajes, normalización de ajustes) con el runner nativo de Node (`node --test`). Qué criterio de aceptación cubre cada uno está en [docs/sdd/06-acceptance.md](docs/sdd/06-acceptance.md).
 - `npm run check` — chequeo de sintaxis (`node --check`) de **todo** el JS, incluido el del navegador (`app.js`, `join.js`, ...) que no se puede unit-testear sin un navegador real.
 - `npm run lint` — ESLint (config flat) sobre server + frontend.
 
@@ -109,14 +114,16 @@ Fases 0 a 4 del plan completas: indexador + parser USDX, motor de puntuación co
 
 Migrado de Docker/Python a un único proceso Node.js, con configuración desde la UI (carpetas de biblioteca vía selector nativo o ruta a mano, IP del servidor, certificado HTTPS). El flujo de "cantante" en el celular quedó de punta a punta: búsqueda con autocompletado, permiso de mic pedido con anticipación, arranque automático al ser llamado, letra en pantalla mientras canta, corte automático y puntaje al terminar (por la Sala o por el propio celular), reconexión con recuperación de la cola si se corta la conexión, y vuelta a elegir canción sin recargar la página. La Sala soporta bibliotecas grandes (selector alfabético), pantalla completa, y varía el efecto visual de fondo por canción cuando no hay video (con fallback automático si el video no es reproducible en el navegador).
 
-El estado previo a esta migración (versión con Docker + motor de puntuación en Python) quedó preservado en la rama `alpha`.
-
-## Licencia
-
-Código bajo licencia [Apache 2.0](LICENSE). Esto cubre el código de este repositorio — no las canciones: la carpeta `songs/` es tuya, no se versiona, y el formato compatible con UltraStar Deluxe no implica que el repo incluya (ni deba incluir) audio/video con derechos de autor de terceros.
+Después de esas fases se sumaron los dos modos de sesión (Karaoke / UltraStar), los duetos con elección dúo/solo, los micrófonos físicos con monitor por parlantes, y los mensajes desde el celular.
 
 Rediseño visual (a partir de un mockup hecho en Claude Design): sistema de tema claro/oscuro con paleta OKLCH y acento configurable vía CSS (`server/public/theme.js` + variables en `style.css`), la Sala pasó a una tarjeta centrada, y el celular ganó un ecualizador de afinación en vivo (12 barras + %, derivado 100% en el cliente del mismo puntaje por frame que ya se mostraba, sin cambios de backend) y una línea de letra "previa" además de actual/siguiente.
 
 Acceso remoto fuera de la LAN para invitados externos (Tailscale/Cloudflare Tunnel) queda pendiente como fase opcional — hoy el acceso público solo se usa para la validación DNS del certificado, no para exponer la app.
 
-Detalle fase por fase, y qué queda pendiente, en [docs/sdd/05-status-roadmap.md](docs/sdd/05-status-roadmap.md).
+El estado previo a la migración a Node (versión con Docker + motor de puntuación en Python) quedó preservado en la rama `alpha`.
+
+Detalle fase por fase, qué queda pendiente y los criterios de aceptación verificables: [docs/sdd/05-status-roadmap.md](docs/sdd/05-status-roadmap.md) y [docs/sdd/06-acceptance.md](docs/sdd/06-acceptance.md).
+
+## Licencia
+
+Código bajo licencia [Apache 2.0](LICENSE). Esto cubre el código de este repositorio — no las canciones: la carpeta `songs/` es tuya, no se versiona, y el formato compatible con UltraStar Deluxe no implica que el repo incluya (ni deba incluir) audio/video con derechos de autor de terceros.
