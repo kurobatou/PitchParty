@@ -5,7 +5,13 @@ Lista numerada y verificable de lo que el sistema **debe** cumplir. Existe para 
 1. Que un test pueda decir "cubro el criterio #12" en vez de "testea la sala".
 2. Que cuando se toque el comportamiento, haya un lugar concreto que actualizar (y que revisar) además del código.
 
-La columna **Verificación** dice cómo se comprueba hoy: `test:<archivo>` = hay un test automatizado que lo cubre (`server/test/`); `manual (Mac)` = solo se verifica a mano en el MacBook porque necesita micrófono real, HTTPS y celulares (ver [`AGENTS.md`](../../AGENTS.md) para el reparto de verificación entre máquinas).
+La columna **Verificación** dice cómo se comprueba hoy:
+
+- `test:<archivo>` — hay un test automatizado que lo cubre (`server/test/`).
+- `manual (curl)` — se comprueba contra el servidor corriendo, sin navegador. Se puede desde cualquier máquina.
+- `manual (navegador)` — hay que mirarlo en un navegador, pero **no** necesita micrófono ni celulares: se puede verificar desde la máquina de desarrollo (ver la nota sobre el certificado de desarrollo en [`AGENTS.md`](../../AGENTS.md)).
+- `manual (Mac)` — solo en el MacBook: necesita micrófono real, celulares conectándose, o la red de la fiesta.
+- `manual` a secas — pendiente de clasificar.
 
 > Los criterios describen lo que ya está implementado. Lo que todavía no existe va en [07-next.md](07-next.md), no acá.
 
@@ -79,6 +85,14 @@ La columna **Verificación** dice cómo se comprueba hoy: `test:<archivo>` = hay
 | 44 | Dado cualquier mensaje con apodo, cuando se guarda, entonces el apodo se recorta y se limita a 40 caracteres. | `test:messages` |
 | 45 | Dado un mensaje existente, cuando se hace `PATCH` con `resolved`, entonces cambia su estado; con un id inexistente responde `404`. | manual |
 | 46 | Dado un `DELETE` de un mensaje, cuando se ejecuta, entonces responde `204` — incluso si ese id ya no existía. | manual |
+| 58 | Dados mensajes pendientes y resueltos, cuando se abre la bandeja, entonces se ven solo los pendientes y un control que indica cuántos resueltos hay. | manual (navegador) |
+| 59 | Dado que no hay ningún mensaje resuelto, cuando se abre la bandeja, entonces ni el control de ver resueltos ni el de borrado masivo están visibles. | manual (navegador) |
+| 60 | Dado el control de resueltos, cuando se activa, entonces se muestran también los resueltos (pendientes primero) sin recargar; al desactivarlo, se vuelven a ocultar. | manual (navegador) |
+| 61 | Dado que todos los mensajes están resueltos y ocultos, cuando se mira la lista, entonces dice cuántos hay ocultos en vez de "no hay mensajes" (que sería engañoso). | manual (navegador) |
+| 62 | Dado que la bandeja se refresca sola cada 15 s, cuando ocurre ese refresco con los resueltos visibles, entonces siguen visibles (el refresco no pisa la preferencia). | manual (navegador) |
+| 63 | Dado `DELETE /api/messages/resolved`, cuando se ejecuta, entonces borra todos los resueltos, **ningún** pendiente, y devuelve cuántos borró. | manual (curl) |
+| 64 | Dado que no hay resueltos, cuando se llama a ese endpoint igual, entonces responde `{ deleted: 0 }` con `200` en vez de error. | manual (curl) |
+| 65 | Dada la acción de borrado masivo en la bandeja, cuando se cancela la confirmación, entonces no se borra nada; cuando se confirma, la lista se actualiza sola y avisa cuántos borró. | manual (navegador) |
 
 ## 6.6 Configuración
 

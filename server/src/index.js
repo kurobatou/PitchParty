@@ -7,7 +7,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 
 import { loadConfig } from './config.js';
-import { openDb, listSongs, getSongById, insertMessage, listMessages, setMessageResolved, deleteMessage } from './db.js';
+import { openDb, listSongs, getSongById, insertMessage, listMessages, setMessageResolved, deleteMessage, deleteResolvedMessages } from './db.js';
 import { validateMessagePayload } from './messages.js';
 import { reindexLibrary } from './indexer.js';
 import { parseUsdxTxt, beatToMs } from './usdxParser.js';
@@ -182,6 +182,13 @@ app.patch('/api/messages/:id', async (request, reply) => {
   const updated = setMessageResolved(db, id, resolved);
   if (!updated) return reply.code(404).send({ error: 'message not found' });
   return updated;
+});
+
+// Bulk cleanup of the inbox. Declared next to '/api/messages/:id' on
+// purpose: Fastify matches the static segment before the parametric one,
+// so 'resolved' never lands in the :id handler.
+app.delete('/api/messages/resolved', async () => {
+  return { deleted: deleteResolvedMessages(db) };
 });
 
 app.delete('/api/messages/:id', async (request, reply) => {

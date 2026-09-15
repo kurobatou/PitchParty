@@ -48,7 +48,6 @@ Cosas ya identificadas como deuda o mejora, que **todavía no tienen mini-spec**
 | Tests de las capas con I/O | Brecha declarada en [05-status-roadmap.md](05-status-roadmap.md) | Endpoints HTTP/WS, indexado con SQLite (necesita DB temporal + fixtures) |
 | `cloudflareApiToken` en texto plano | Brecha declarada en [05-status-roadmap.md](05-status-roadmap.md) | Vive sin cifrar en `server/data/settings.json` |
 | Sin autenticación en Configuración | Brecha declarada en [05-status-roadmap.md](05-status-roadmap.md) | Cualquiera en la LAN puede cambiar carpetas, IP y certificado |
-| Limpieza de mensajes viejos | Tabla `messages` (ver [04-data-model.md](04-data-model.md)) | Nada la purga: crece indefinidamente hasta que alguien borra a mano |
 
 ## Features en especificación
 

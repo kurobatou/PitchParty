@@ -2,9 +2,16 @@ import { messageTypeInfo } from './messageTypes.js';
 
 const listEl = document.getElementById('message-list');
 const refreshBtn = document.getElementById('refresh-btn');
+const toggleResolvedBtn = document.getElementById('toggle-resolved-btn');
+const purgeResolvedBtn = document.getElementById('purge-resolved-btn');
 const statusEl = document.getElementById('messages-status');
 
 let messages = [];
+// Resolved messages are hidden by default so what's actually pending isn't
+// buried under everything already handled. This lives outside loadMessages
+// on purpose: the 15s auto-refresh must not collapse the list while someone
+// is reading it.
+let showResolved = false;
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -25,13 +32,33 @@ function messageBody(m) {
   return escapeHtml(m.text || '');
 }
 
+function renderControls(resolvedCount) {
+  toggleResolvedBtn.hidden = resolvedCount === 0;
+  toggleResolvedBtn.textContent = showResolved
+    ? `🙈 Ocultar resueltos (${resolvedCount})`
+    : `👁 Ver resueltos (${resolvedCount})`;
+
+  purgeResolvedBtn.hidden = resolvedCount === 0;
+  purgeResolvedBtn.textContent = `🧹 Borrar resueltos (${resolvedCount})`;
+}
+
 function renderMessages() {
+  const resolvedCount = messages.filter((m) => m.resolved).length;
+  renderControls(resolvedCount);
+
+  const visible = showResolved ? messages : messages.filter((m) => !m.resolved);
+
   if (messages.length === 0) {
     listEl.innerHTML = '<li class="settings-hint">No hay mensajes todavía.</li>';
     return;
   }
 
-  listEl.innerHTML = messages.map((m) => {
+  if (visible.length === 0) {
+    listEl.innerHTML = `<li class="settings-hint">No hay mensajes pendientes. Hay ${resolvedCount} resuelto${resolvedCount === 1 ? '' : 's'} oculto${resolvedCount === 1 ? '' : 's'}.</li>`;
+    return;
+  }
+
+  listEl.innerHTML = visible.map((m) => {
     const info = messageTypeInfo(m.type);
     const when = new Date(m.created_at).toLocaleString();
     const who = m.nickname ? escapeHtml(m.nickname) : 'Anónimo';
@@ -85,6 +112,29 @@ async function deleteMessage(id) {
   await loadMessages();
 }
 
+async function purgeResolved() {
+  const resolvedCount = messages.filter((m) => m.resolved).length;
+  if (resolvedCount === 0) return;
+
+  const plural = resolvedCount === 1 ? 'el mensaje resuelto' : `los ${resolvedCount} mensajes resueltos`;
+  if (!confirm(`¿Borrar ${plural}? Los pendientes no se tocan. Esto no se puede deshacer.`)) return;
+
+  try {
+    const res = await fetch('/api/messages/resolved', { method: 'DELETE' });
+    const { deleted } = await res.json();
+    await loadMessages();
+    statusEl.textContent = `Se borraron ${deleted} mensaje${deleted === 1 ? '' : 's'} resuelto${deleted === 1 ? '' : 's'}.`;
+  } catch (err) {
+    statusEl.textContent = `No se pudo borrar: ${err.message}`;
+  }
+}
+
 refreshBtn.addEventListener('click', loadMessages);
+toggleResolvedBtn.addEventListener('click', () => {
+  showResolved = !showResolved;
+  renderMessages();
+});
+purgeResolvedBtn.addEventListener('click', purgeResolved);
+
 loadMessages();
 setInterval(loadMessages, 15000);

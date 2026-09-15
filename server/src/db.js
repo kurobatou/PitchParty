@@ -125,3 +125,11 @@ export function setMessageResolved(db, id, resolved) {
 export function deleteMessage(db, id) {
   db.prepare('DELETE FROM messages WHERE id = ?').run(id);
 }
+
+// Bulk cleanup for the inbox: only resolved rows, never pending ones — an
+// unattended bug report or song request shouldn't disappear just because
+// someone clicked "clean up". Returns how many were removed so the UI can
+// say it out loud.
+export function deleteResolvedMessages(db) {
+  return db.prepare('DELETE FROM messages WHERE resolved = 1').run().changes;
+}

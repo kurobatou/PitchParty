@@ -64,14 +64,16 @@ Este proyecto se desarrolla en dos máquinas y **no todo se puede probar en las 
 **En Windows (máquina de desarrollo) se puede y se debe verificar:**
 - `npm run ci` completo — los 51 tests, lint y syntax-check pasan acá sin problema (~90 s).
 - Toda la lógica pura: parser USDX, scoring, detección de tono, `Room`/cola/ranking, validación de mensajes, normalización de settings.
-- Que el servidor levante y las páginas carguen.
-- Los docs: que `docs/sdd/` describa lo que el código realmente hace.
+- La API completa, contra el servidor corriendo (`curl`).
+- **La UI que no necesita micrófono** — la bandeja de mensajes, Configuración, el catálogo de la Sala: se abren en un navegador real y se verifican ahí.
+
+> **Certificado de desarrollo.** El micrófono exige HTTPS, así que el servidor siempre levanta con TLS; con el certificado autofirmado, las herramientas de automatización de navegador no pueden cargar la página (rechazan el certificado sin ofrecer un "avanzar igual"). La solución es usar la propia feature del proyecto: en la máquina de desarrollo hay configurado un dominio con certificado real de Let's Encrypt vía DNS-01 (`dev.pp.batou.rocks` → la IP LAN de esa máquina, registro A en Cloudflare, **DNS only, sin proxy**). Con eso el navegador entra sin advertencias. Si hay que rehacerlo en otra máquina: agregar el registro A, y cargar dominio + token de Cloudflare + email desde **⚙️ Configuración → Certificado HTTPS**; el certificado se toma recién al reiniciar el proceso.
 
 **En el MacBook (donde se usa de verdad, con amigos) hay que verificar:**
 - Todo lo marcado `manual (Mac)` en [`docs/sdd/06-acceptance.md`](docs/sdd/06-acceptance.md).
-- Cualquier cosa que toque: micrófono real, HTTPS con certificado válido, celulares conectándose por QR, duetos en vivo, monitor de micrófono, latencia real de red.
+- Cualquier cosa que toque: micrófono real, celulares conectándose por QR, duetos en vivo, monitor de micrófono, latencia real de red.
 
-**Regla práctica:** si un cambio toca captura de audio, HTTPS o el navegador del celular, **no lo declares terminado desde Windows**. Dejalo commiteado y push-eado, y decí explícitamente qué falta probar en el MacBook.
+**Regla práctica:** si un cambio toca captura de audio o el navegador del celular, **no lo declares terminado desde Windows**. Dejalo commiteado y push-eado, y decí explícitamente qué falta probar en el MacBook. Lo que es solo UI de escritorio sí se cierra acá — no lo dejes pendiente "por las dudas".
 
 ## Flujo entre las dos máquinas
 
