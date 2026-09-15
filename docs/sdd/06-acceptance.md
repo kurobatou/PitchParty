@@ -65,6 +65,7 @@ La columna **Verificación** dice cómo se comprueba hoy:
 | 69 | Dado un `setNickname` vacío o solo con espacios, cuando se aplica, entonces se conserva el nombre anterior (nadie queda sin nombre). | `test:room` |
 | 70 | Dado un `setNickname` de un `userId` inexistente, cuando se procesa, entonces no rompe ni crea usuarios (devuelve `null`). | `test:room` |
 | 71 | Dado un usuario ya unido, cuando toca su propio nombre en el encabezado del celular, entonces se abre el modal de renombrado con el nombre actual precargado. | manual (navegador) |
+| 72 | Dado un `join` con un nombre con espacios sobrantes o más de 24 caracteres, cuando se crea el usuario, entonces se aplican las **mismas** reglas que en `setNickname` — el `maxlength` del formulario no se toma como garantía. | `test:room` |
 
 ## 6.4 Modos, duetos y participantes sin celular
 

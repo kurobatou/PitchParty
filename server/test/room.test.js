@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Room, MAX_ACTIVE_SINGERS } from '../src/room.js';
+import { Room, MAX_ACTIVE_SINGERS, NICKNAME_MAX_LEN } from '../src/room.js';
 
 function fakeSocket() {
   return { OPEN: 1, readyState: 1, sent: [], send(p) { this.sent.push(p); } };
@@ -14,6 +14,19 @@ test('join creates a user with defaults and a fallback nickname', () => {
   assert.equal(user.state, 'connected');
   assert.equal(user.connected, true);
   assert.ok(user.nickname.startsWith('Invitado-'), 'blank nickname gets a default');
+});
+
+test('join applies the same name rules as setNickname (the UI cap is not a guarantee)', () => {
+  const room = new Room();
+
+  const long = room.join(fakeSocket(), { nickname: 'x'.repeat(300), role: 'singer' });
+  assert.equal(room.users.get(long).nickname, 'x'.repeat(NICKNAME_MAX_LEN), 'caps a crafted long name');
+
+  const padded = room.join(fakeSocket(), { nickname: '  Batou  ', role: 'guest' });
+  assert.equal(room.users.get(padded).nickname, 'Batou', 'trims whitespace');
+
+  const blank = room.join(fakeSocket(), { nickname: '   ', role: 'guest' });
+  assert.ok(room.users.get(blank).nickname.startsWith('Invitado-'), 'whitespace-only falls back');
 });
 
 test('setNickname renames in place, trims/caps, and keeps the queue spot', () => {

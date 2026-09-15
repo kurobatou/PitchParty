@@ -32,7 +32,7 @@ Canal de control de la sala. Lo usan tanto la Sala (`role: "screen"`) como cada 
 
 | `type` | Campos | Quién lo manda | Efecto |
 |---|---|---|---|
-| `join` | `nickname?`, `role` (`"screen"` \| `"singer"` \| `"guest"`) | Cualquiera, al conectar por primera vez | Crea un usuario nuevo en `Room` (id `randomUUID()`), responde `welcome`, y hace broadcast de `roomState` a todos. |
+| `join` | `nickname?`, `role` (`"screen"` \| `"singer"` \| `"guest"`) | Cualquiera, al conectar por primera vez | Crea un usuario nuevo en `Room` (id `randomUUID()`), responde `welcome`, y hace broadcast de `roomState` a todos. El nombre pasa por las **mismas reglas que `setNickname`** (recortado y limitado a 24 caracteres); si queda vacío se asigna `Invitado-xxxx`. El `maxlength` del formulario no alcanza como garantía: un cliente WebSocket cualquiera puede mandar lo que quiera. |
 | `rejoin` | `userId` | Un celular que se reconecta tras perder el socket | Si `userId` sigue vivo (dentro de `DISCONNECT_GRACE_MS` = 90s desde que se cayó), reclama su registro existente y responde `welcome` con `rejoined: true`. Si no, responde `rejoinFailed`. |
 | `chooseSong` | `songId`, `duetMode?` (`"duo"` \| `"solo"`) | Cantante/invitado | Guarda la canción elegida en el usuario y lo encola (`Room.enqueue`) si `songId` es válido. `duetMode` dice cómo tocar una canción de dos voces (cualquier otro valor se guarda como `null`). Broadcast de `roomState`. |
 | `setRole` | `role` (`"singer"` \| `"guest"`) | Un celular que cambia de idea a mitad de sesión | Cambia el rol sin tener que desconectarse y volver a unirse. Cualquier otro valor se ignora. Broadcast de `roomState`. |

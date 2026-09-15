@@ -14,6 +14,16 @@ export const MAX_ACTIVE_SINGERS = 4;
 // silently bump someone out of the queue and lose their song choice.
 export const DISCONNECT_GRACE_MS = 90_000;
 
+// Every name that enters the room goes through here, whether it arrives on
+// `join` or on a later `setNickname`. The UI caps the field at 24, but the
+// server can't rely on that: a crafted WebSocket client would otherwise
+// park a 300-character name in the queue and wreck the Sala layout.
+export const NICKNAME_MAX_LEN = 24;
+
+function cleanNickname(nickname) {
+  return String(nickname ?? '').trim().slice(0, NICKNAME_MAX_LEN);
+}
+
 export class Room {
   constructor() {
     this.users = new Map(); // id -> { id, nickname, role, state, songId, songTitle, lastScore, latencyMs, socket, connected }
@@ -55,7 +65,7 @@ export class Room {
     const id = randomUUID();
     this.users.set(id, {
       id,
-      nickname: nickname || `Invitado-${id.slice(0, 4)}`,
+      nickname: cleanNickname(nickname) || `Invitado-${id.slice(0, 4)}`,
       role, // 'guest' | 'singer' | 'screen'
       state: 'connected',
       songId: null,
@@ -75,7 +85,7 @@ export class Room {
   setNickname(id, nickname) {
     const user = this.users.get(id);
     if (!user) return null;
-    const clean = String(nickname ?? '').trim().slice(0, 24);
+    const clean = cleanNickname(nickname);
     if (clean) user.nickname = clean;
     return user.nickname;
   }
